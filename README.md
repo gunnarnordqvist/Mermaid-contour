@@ -106,6 +106,19 @@ The book's repository keeps its own copy of `src/mermaid-contour.mjs` (`docs/jav
 diagram text from its landscape models (`scripts/contour_text.py`). The figures of the book are still drawn by its Python renderer;
 this package is the interactive, web form of the same views.
 
+## Releasing
+
+GitHub Actions publishes to npm (`.github/workflows/publish.yml`) when a version tag is pushed. It checks that the tag equals the
+version in `package.json`, runs `npm test`, and publishes with provenance.
+
+```bash
+npm version patch          # or minor, major: edits package.json, commits, and creates the tag vX.Y.Z
+git push --follow-tags
+```
+
+One-time setup, by the owner of the npm package: create an access token on npmjs.com that may publish this package, and add it to the
+repository under *Settings, Secrets and variables, Actions* as `NPM_TOKEN`.
+
 ## Licence
 
 Apache-2.0, see `LICENSE`.

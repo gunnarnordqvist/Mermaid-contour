@@ -36,5 +36,9 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/gunnarnordqvist/Mermaid-contour.git"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   }
 }
