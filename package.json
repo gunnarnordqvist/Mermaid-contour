@@ -9,7 +9,7 @@
     ".": "./src/mermaid-contour.mjs"
   },
   "bin": {
-    "contour-render": "./bin/contour-render.mjs"
+    "contour-render": "bin/contour-render.mjs"
   },
   "files": [
     "src",

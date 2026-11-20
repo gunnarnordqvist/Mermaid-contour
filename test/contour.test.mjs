@@ -90,3 +90,14 @@ test(`wrapToWidth equals Python's textwrap on ${golden.length} strings`, () => {
   });
   assert.deepEqual(bad.slice(0, 3), []);
 });
+
+test('package.json: bin and exports point at files that exist, without a leading ./ in bin', () => {
+  // npm 11 removes a bin entry written as "./bin/x.mjs" when it publishes (it warns "script name was invalid and removed")
+  const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  for (const [name, target] of Object.entries(pkg.bin)) {
+    assert.ok(!target.startsWith('./'), `bin ${name}: ${target} must not start with ./`);
+    assert.ok(fs.existsSync(new URL(`../${target}`, import.meta.url)), `bin ${name}: ${target} is missing`);
+  }
+  assert.ok(fs.existsSync(new URL(`../${pkg.exports['.']}`, import.meta.url)));
+  assert.ok(fs.existsSync(new URL(`../${pkg.main}`, import.meta.url)));
+});
