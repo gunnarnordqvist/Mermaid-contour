@@ -108,16 +108,23 @@ this package is the interactive, web form of the same views.
 
 ## Releasing
 
-GitHub Actions publishes to npm (`.github/workflows/publish.yml`) when a version tag is pushed. It checks that the tag equals the
-version in `package.json`, runs `npm test`, and publishes with provenance.
+GitHub Actions publishes to npm (`.github/workflows/publish.yml`) when a version tag is pushed, using npm's
+[trusted publishing](https://docs.npmjs.com/trusted-publishers): no token is stored anywhere. The workflow checks that the tag equals the
+version in `package.json`, runs `npm test`, and publishes; provenance is recorded automatically.
 
 ```bash
 npm version patch          # or minor, major: edits package.json, commits, and creates the tag vX.Y.Z
 git push --follow-tags
 ```
 
-One-time setup, by the owner of the npm package: create an access token on npmjs.com that may publish this package, and add it to the
-repository under *Settings, Secrets and variables, Actions* as `NPM_TOKEN`.
+One-time setup, by the owner of the npm package. npm configures a trusted publisher on an existing package, so the first
+version is published by hand:
+
+1. `npm login`, then `npm publish` from a clone (npm asks for your two-factor code).
+2. On npmjs.com open the package, *Settings, Trusted publishing*, choose GitHub Actions and enter the user `gunnarnordqvist`, the
+   repository `Mermaid-contour` and the workflow filename `publish.yml` (all case-sensitive).
+3. Publish the next version by tag, as above, within two days: npm requires a new trusted publisher to complete its first publish in that time.
+4. Then, under *Settings, Publishing access*, choose "Require two-factor authentication and disallow tokens".
 
 ## Licence
 

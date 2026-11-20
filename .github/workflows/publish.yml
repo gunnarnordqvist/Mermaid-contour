@@ -1,10 +1,12 @@
 name: publish
 
-# Publishes the package to npm when a version tag is pushed:
+# Publishes the package to npm when a version tag is pushed, with npm's trusted publishing (OIDC): there is no
+# token to store or leak. npm trusts this exact workflow of this exact repository, which is configured once on the
+# package's settings page on npmjs.com (Settings, Trusted publishing: GitHub Actions, user gunnarnordqvist,
+# repository Mermaid-contour, workflow filename publish.yml). Provenance is then recorded automatically.
+#
 #   npm version patch   (or minor, major)  -> edits package.json and creates the tag vX.Y.Z
 #   git push --follow-tags
-# Needs the repository secret NPM_TOKEN (an npm access token that may publish this package).
-# `--provenance` makes npm record that the package was built from this repository by this workflow.
 on:
   push:
     tags:
@@ -12,16 +14,16 @@ on:
 
 permissions:
   contents: read
-  id-token: write # the identity that provenance is signed with
+  id-token: write # lets npm verify which workflow is publishing
 
 jobs:
   publish:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest # trusted publishing supports only cloud-hosted runners
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24 # trusted publishing needs npm 11.5.1 or later and Node 22.14 or later
           registry-url: https://registry.npmjs.org
       - name: The tag must equal the version in package.json
         run: |
@@ -35,7 +37,4 @@ jobs:
         env:
           PUPPETEER_SKIP_DOWNLOAD: "1"
       - run: npm test
-      - name: Publish
-        run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - run: npm publish
