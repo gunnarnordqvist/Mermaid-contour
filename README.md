@@ -109,39 +109,26 @@ this package is the interactive, web form of the same views.
 ## Releasing
 
 GitHub Actions publishes to npm (`.github/workflows/publish.yml`) when a version tag is pushed, using npm's
-[trusted publishing](https://docs.npmjs.com/trusted-publishers): no token is stored anywhere. The workflow checks that the tag equals the
-version in `package.json`, runs `npm test`, and publishes; provenance is recorded automatically.
+[trusted publishing](https://docs.npmjs.com/trusted-publishers): no token is stored anywhere, and provenance is recorded automatically.
+The workflow checks that the tag equals the version in `package.json`, runs `npm test`, and publishes.
 
 ```bash
 npm version patch          # or minor, major: edits package.json, commits, and creates the tag vX.Y.Z
 git push --follow-tags
 ```
 
-One-time setup, by the owner of the npm package. npm configures a trusted publisher on an existing package, so the first
-version is published separately, either of these two ways:
+Without a computer: edit `version` in `package.json` on GitHub and commit, then *Releases, Draft a new release*, type the tag
+`v<version>` in *Choose a tag*, choose *Create new tag on publish*, target `main`, and publish the release.
 
-**On a computer:** `npm login`, then `npm publish` from a clone (npm asks for your two-factor code). No token is created.
+The trusted publisher is set on the package's page on npmjs.com (*Settings, Trusted publishing*): GitHub Actions, user `gunnarnordqvist`,
+repository `Mermaid-contour`, workflow `publish.yml`, no environment, *Allow npm publish* ticked. Those fields are case-sensitive and must
+match `repository.url` in `package.json`. Version 0.1.0 was staged and approved by hand, because npm sets up trusted publishing
+only on a package that exists; 0.1.1 was the first release made this way.
 
-**Without a computer** (only web pages): `.github/workflows/publish-first.yml` stages the first version with a short-lived token, and you approve it on npmjs.com.
+## For Mermaid itself
 
-1. On npmjs.com, *Access Tokens, Generate New Token, Granular Access Token*: any name, expiration **one day**, permission
-   *Read and write (stage only)* (this token cannot publish directly; that is the safer choice), packages *All packages* (the package
-   does not exist yet). Copy the token.
-2. On GitHub, in this repository, *Settings, Secrets and variables, Actions, New repository secret*: name `NPM_TOKEN`, value the token.
-3. *Actions, publish-first, Run workflow*. When it is green, the version is staged. npm also publishes a placeholder version `0.0.0-stage` of a new package.
-4. On npmjs.com open *Staged Packages* and approve the version with your two-factor code. Now `mermaid-contour` 0.1.0 is on npm.
-5. At once: delete the secret `NPM_TOKEN` on GitHub, and revoke the token on npmjs.com (it expires after a day anyway).
-
-Then, on either route:
-
-6. On npmjs.com open the package, *Settings, Trusted publishing*, choose GitHub Actions and enter the user `gunnarnordqvist`, the
-   repository `Mermaid-contour` and the workflow filename `publish.yml` (all case-sensitive).
-7. Publish the next version by tag within two days (npm requires a new trusted publisher to complete its first publish in that time).
-   The version in `package.json` must be higher than the one on npm and equal to the tag without the `v`. Without a computer: on GitHub
-   open *Releases, Draft a new release*, in *Choose a tag* type `v0.1.1` and choose *Create new tag on publish*, target `main`, and
-   publish the release. The tag starts `publish.yml`.
-8. Delete `.github/workflows/publish-first.yml`, and under *Settings, Publishing access* on npmjs.com choose
-   "Require two-factor authentication and disallow tokens".
+`upstream/` holds a patch series that makes `contour-beta` a built-in diagram of Mermaid, instead of a plugin; see `upstream/README.md`
+for how to apply it and for what is verified and what is not.
 
 ## Licence
 
