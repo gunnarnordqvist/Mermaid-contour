@@ -1,0 +1,269 @@
+From 343f2b8279bfa61b0ba44d1772e944e442d91887 Mon Sep 17 00:00:00 2001
+From: claude <noreply@anthropic.com>
+Date: Fri, 20 Nov 2026 23:00:05 +0000
+Subject: [PATCH 8/9] feat(contour): port the year view (V2) to TypeScript
+
+---
+ .../src/diagrams/contour/views/year.spec.ts   | 108 ++++++++++++++
+ .../src/diagrams/contour/views/year.ts        | 134 +++++++++++++++++-
+ 2 files changed, 237 insertions(+), 5 deletions(-)
+ create mode 100644 packages/mermaid/src/diagrams/contour/views/year.spec.ts
+
+diff --git a/packages/mermaid/src/diagrams/contour/views/year.spec.ts b/packages/mermaid/src/diagrams/contour/views/year.spec.ts
+new file mode 100644
+index 0000000..fc9d786
+--- /dev/null
++++ b/packages/mermaid/src/diagrams/contour/views/year.spec.ts
+@@ -0,0 +1,108 @@
++import { beforeEach, describe, expect, it } from 'vitest';
++import type { Diagram } from '../../../Diagram.js';
++import * as configApi from '../../../config.js';
++import { PAL, modeColour } from '../common.js';
++import { ContourDB } from '../db.js';
++import { parser } from '../parser.js';
++import { renderer } from '../renderer.js';
++
++const diagramId = 'contour-year';
++
++const svgElement = () => document.querySelector(`#${diagramId}`)!;
++
++const renderYear = async (body: string) => {
++  configApi.reset();
++  document.body.innerHTML = `<svg id="${diagramId}"></svg>`;
++  const text = `contour-beta\n view year\n title T\n${body}`;
++  const db = new ContourDB();
++  parser.parser = { yy: db } as never;
++  await parser.parse(text);
++  await renderer.draw(text, diagramId, 'test', { db } as unknown as Diagram);
++};
++
++const panel = (name: string, ...units: string[]) =>
++  ` panel "${name}"\n${units.map((u) => `  ${u}`).join('\n')}\n`;
++const unit = (id: string, level: number, rev: string, extra = '') =>
++  `unit ${id} "${id}" level=${level} rev=${rev} reach=S mode=1 ${extra}`;
++
++const markers = (id: string) => svgElement().querySelectorAll(`desc[data-unit="${id}"]`);
++const texts = () => [...svgElement().querySelectorAll('text')].map((t) => t.textContent);
++/** The 1.3 pt crossing strokes of a retired or removed unit, drawn in ink. */
++const crosses = () =>
++  svgElement().querySelectorAll(`polyline[stroke="${PAL.ink}"][stroke-width="1.81"]`);
++/** The trail between a ghost and its mark, in mode 1 colour and 1 pt. */
++const trails = () =>
++  svgElement().querySelectorAll(`polyline[stroke="${modeColour(1)}"][stroke-width="1.39"]`);
++/** The open circles of the ghosts, in mode 1 colour. */
++const ghosts = () =>
++  svgElement().querySelectorAll(`circle[fill="none"][stroke="${modeColour(1)}"]`);
++
++describe('contour V2, the landscape over time', () => {
++  beforeEach(() => {
++    configApi.reset();
++  });
++
++  it('draws a unit that moved once, with a ghost at its start and a trail', async () => {
++    await renderYear(panel('Start', unit('A', 1, 'R1')) + panel('End', unit('A', 3, 'R2')));
++    expect(markers('A')).toHaveLength(1);
++    expect(ghosts()).toHaveLength(1);
++    expect(trails()).toHaveLength(1);
++    expect(crosses()).toHaveLength(0);
++    expect(texts()).toContain('Start  →  End');
++  });
++
++  it('marks a unit that is only in the end panel as new', async () => {
++    await renderYear(
++      panel('Start', unit('A', 1, 'R1')) + panel('End', unit('A', 1, 'R1'), unit('B', 2, 'R2'))
++    );
++    expect(markers('B')).toHaveLength(1);
++    expect(texts().filter((t) => t === 'new')).toHaveLength(1);
++    expect(ghosts()).toHaveLength(0);
++  });
++
++  it('draws a unit only in the start panel hollow and crossed', async () => {
++    await renderYear(
++      panel('Start', unit('A', 1, 'R1'), unit('B', 2, 'R2')) + panel('End', unit('A', 1, 'R1'))
++    );
++    expect(markers('B')).toHaveLength(1);
++    expect(crosses()).toHaveLength(2);
++    expect(trails()).toHaveLength(0);
++  });
++
++  it('draws identical panels without ghosts, trails or new ticks', async () => {
++    const p = [unit('A', 1, 'R1'), unit('B', 4, 'R4')];
++    await renderYear(panel('Start', ...p) + panel('End', ...p));
++    expect(markers('A')).toHaveLength(1);
++    expect(markers('B')).toHaveLength(1);
++    expect(ghosts()).toHaveLength(0);
++    expect(trails()).toHaveLength(0);
++    expect(crosses()).toHaveLength(0);
++    expect(texts().filter((t) => t === 'new')).toHaveLength(0);
++  });
++
++  it('draws the grid and the legend for empty panels', async () => {
++    await renderYear(` panel "Start"\n panel "End"\n`);
++    expect(svgElement().querySelectorAll('desc[data-unit]')).toHaveLength(0);
++    expect(texts()).toEqual(expect.arrayContaining(['Start  →  End', 'the empty corner', 'Trail']));
++  });
++
++  it('keeps every mark of a crowded cell, ghosts included, apart', async () => {
++    const ids = ['A', 'B', 'C', 'D', 'E', 'F'];
++    await renderYear(
++      panel('Start', ...ids.map((id) => unit(id, 2, 'R2')), unit('G', 0, 'R1')) +
++        panel('End', ...ids.map((id) => unit(id, 2, 'R2')), unit('G', 2, 'R2'))
++    );
++    const pos = [...ids, 'G'].map((id) => {
++      const m = markers(id);
++      expect(m).toHaveLength(1);
++      return [Number(m[0].getAttribute('data-x')), Number(m[0].getAttribute('data-y'))];
++    });
++    for (let i = 0; i < pos.length; i++) {
++      for (let j = i + 1; j < pos.length; j++) {
++        const d = Math.hypot(pos[i][0] - pos[j][0], pos[i][1] - pos[j][1]);
++        expect(d).toBeGreaterThan(0.15);
++      }
++    }
++    expect(ghosts()).toHaveLength(1);
++  });
++});
+diff --git a/packages/mermaid/src/diagrams/contour/views/year.ts b/packages/mermaid/src/diagrams/contour/views/year.ts
+index f8431ab..f8b6b1c 100644
+--- a/packages/mermaid/src/diagrams/contour/views/year.ts
++++ b/packages/mermaid/src/diagrams/contour/views/year.ts
+@@ -1,7 +1,131 @@
+-import type { Canvas } from '../canvas.js';
+-import type { ContourModel } from '../types.js';
++// cspell:ignore zorder
++import { Canvas } from '../canvas.js';
++import {
++  CELL_V1,
++  COL_LABEL_HEIGHT,
++  FIG,
++  FOOTER_BAND,
++  LEGEND_BOTTOM,
++  LEGEND_TOP,
++  LEGEND_WIDTH,
++  MARGIN,
++  PAL,
++  ROW_LABEL_WIDTH,
++  TITLE_BAND,
++  compareStrings,
++  drawBackground,
++  drawGhost,
++  drawGrid,
++  drawLegend,
++  drawMark,
++  drawTitleFooter,
++  ghostFootprint,
++  gridCentre,
++  layoutInCell,
++  markFootprint,
++  modeColour,
++  round,
++} from '../common.js';
++import type { CellEdge, Footprint, Positions } from '../common.js';
++import type { ContourModel, ContourUnit } from '../types.js';
+ 
+-/** V2 The landscape over time. */
+-export function layoutYear(_model: ContourModel): Canvas {
+-  throw new Error('contour: view year is not implemented');
++interface YearItem {
++  key: string;
++  fp: Footprint;
++  u: ContourUnit;
++}
++
++/** V2 The landscape over time: the end state, ghosts and trails for what moved, hollow crossed marks for what left. */
++export function layoutYear(model: ContourModel): Canvas {
++  const [start, end] = model.panels;
++  const cv = new Canvas(FIG.W, FIG.H);
++  drawBackground(cv);
++  drawTitleFooter(cv, model);
++  const stripH = 0.2;
++  const x0 = MARGIN + ROW_LABEL_WIDTH;
++  const top = cv.height - TITLE_BAND;
++  const bottom = FOOTER_BAND + stripH;
++  const block = 4 * CELL_V1 + COL_LABEL_HEIGHT;
++  const y0 = round(bottom + COL_LABEL_HEIGHT + (top - bottom - block) / 2, 4);
++  const grid = { x0, y0, cell: CELL_V1 };
++  const before = new Map(start.units.map((u) => [u.id, u]));
++  const after = new Map(end.units.map((u) => [u.id, u]));
++  drawGrid(cv, grid);
++
++  const moved = new Set<string>();
++  for (const [id, b] of before) {
++    const a = after.get(id);
++    if (a && (b.level !== a.level || b.reversibility !== a.reversibility)) {
++      moved.add(id);
++    }
++  }
++  const byCell = new Map<string, YearItem[]>();
++  const add = (u: ContourUnit, key: string, fp: Footprint) => {
++    const k = `${u.level},${u.reversibility}`;
++    const items = byCell.get(k) ?? [];
++    items.push({ key, fp, u });
++    byCell.set(k, items);
++  };
++  const ids = [...new Set([...before.keys(), ...after.keys()])].sort(compareStrings);
++  for (const id of ids) {
++    const a = after.get(id);
++    const b = before.get(id);
++    if (a) {
++      add(a, id, markFootprint(a, { isNew: !b }));
++    } else if (b) {
++      add(b, id, markFootprint(b));
++    }
++  }
++  for (const id of [...moved].sort(compareStrings)) {
++    const b = before.get(id);
++    if (b) {
++      add(b, `${id}@start`, ghostFootprint(b));
++    }
++  }
++  const pos: Positions = Object.create(null) as Positions;
++  for (const items of byCell.values()) {
++    const { level, reversibility } = items[0].u;
++    const [cx, cy] = gridCentre(grid, level, reversibility);
++    let edge: CellEdge = null;
++    if (reversibility === 'R4') {
++      edge = 'top';
++    } else if (reversibility === 'R1') {
++      edge = 'bottom';
++    }
++    const p = layoutInCell(items, grid.cell, grid.cell, edge);
++    for (const k of Object.keys(p)) {
++      pos[k] = [cx + p[k][0], cy + p[k][1]];
++    }
++  }
++  for (const id of ids) {
++    const [x, y] = pos[id];
++    const a = after.get(id);
++    const b = before.get(id);
++    if (a) {
++      drawMark(cv, x, y, a, { isNew: !b });
++      const ghost = pos[`${id}@start`];
++      if (b && moved.has(id) && ghost) {
++        const [gx, gy] = ghost;
++        drawGhost(cv, gx, gy, b);
++        cv.line([gx, x], [gy, y], { colour: modeColour(a.mode), lw: 1.0, zorder: 2.6 });
++      }
++    } else if (b) {
++      drawMark(cv, x, y, b, { hollowOverride: true, crossedOverride: true });
++    }
++  }
++  const stripY = y0 - COL_LABEL_HEIGHT - 0.1;
++  cv.line([x0, x0 + 5 * CELL_V1], [stripY + 0.1, stripY + 0.1], { colour: PAL.grid, lw: 0.8 });
++  cv.text(x0, stripY, `${start.name}  →  ${end.name}`, { weight: 'bold' });
++  drawLegend(
++    cv,
++    cv.width - MARGIN - LEGEND_WIDTH,
++    cv.height - LEGEND_TOP,
++    LEGEND_BOTTOM,
++    LEGEND_WIDTH,
++    1,
++    {
++      trail: true,
++    }
++  );
++  return cv;
+ }
+-- 
+2.43.0
+

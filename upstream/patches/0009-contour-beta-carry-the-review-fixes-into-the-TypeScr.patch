@@ -1,0 +1,375 @@
+From 170221b1122c7810f668424e98da69fd22070a3a Mon Sep 17 00:00:00 2001
+From: claude <noreply@anthropic.com>
+Date: Fri, 20 Nov 2026 23:07:43 +0000
+Subject: [PATCH 9/9] contour-beta: carry the review fixes into the TypeScript
+ port (textwrap, code points, id order, planned, ids per panel)
+
+---
+ .../mermaid/src/diagrams/contour/common.ts    | 148 +++++++++++-------
+ .../src/diagrams/contour/contour.spec.ts      |  22 ++-
+ .../mermaid/src/diagrams/contour/parser.ts    |  17 +-
+ .../src/diagrams/contour/renderer.spec.ts     |  11 --
+ .../mermaid/src/diagrams/contour/types.ts     |   2 +-
+ packages/mermaid/src/docs/syntax/contour.md   |   6 +-
+ 6 files changed, 121 insertions(+), 85 deletions(-)
+
+diff --git a/packages/mermaid/src/diagrams/contour/common.ts b/packages/mermaid/src/diagrams/contour/common.ts
+index 0df15ea..f11d3ca 100644
+--- a/packages/mermaid/src/diagrams/contour/common.ts
++++ b/packages/mermaid/src/diagrams/contour/common.ts
+@@ -1,4 +1,4 @@
+-// cspell:ignore zorder capstyle textwrap
++// cspell:ignore zorder capstyle textwrap wordsep expandtabs
+ /**
+  * The core shared by the six views of Contour: scales, palette, geometry in inches and the marks.
+  *
+@@ -147,8 +147,14 @@ export const hollow = (u: Pick<ContourUnit, 'status'>): boolean =>
+ export const redRule = (u: Pick<ContourUnit, 'level' | 'policy'>): boolean =>
+   u.level === 3 && u.policy !== 'enforced';
+ 
++/** Python counts code points where JavaScript counts UTF-16 units; the layout must count as the renderer does. */
++const codePoints = (s: string): string[] => [...s];
++const cpLen = (s: string): number => codePoints(s).length;
++const cpSlice = (s: string, start: number, end?: number): string =>
++  codePoints(s).slice(start, end).join('');
++
+ export const textWidth = (s: string, size = FONT_SIZE): number =>
+-  s.length * CHAR_WIDTH * (size / FONT_SIZE);
++  cpLen(s) * CHAR_WIDTH * (size / FONT_SIZE);
+ 
+ const compareStrings = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+ 
+@@ -169,73 +175,104 @@ export const textOn = (fill: string): string =>
+   contrast(fill, '#FFFFFF') >= contrast(fill, PAL.ink) ? '#FFFFFF' : PAL.ink;
+ export const modeColour = (m: number): string => PAL.modes[m][1];
+ 
+-/** Word wrap like Python's textwrap.wrap: break at spaces and after a hyphen between letters. */
+-export function wrapToWidth(
+-  s: string,
+-  width: number,
+-  size = FONT_SIZE,
+-  maxLines: number | null = null
+-): string[] {
+-  const chars = Math.max(8, Math.floor(width / ((CHAR_WIDTH * size) / FONT_SIZE)));
+-  const chunks: string[] = [];
+-  for (const part of s.trim().split(/(\s+)/)) {
+-    if (!part) {
+-      continue;
+-    }
+-    if (/^\s+$/.test(part)) {
+-      chunks.push(' ');
++// Python 3.12's textwrap.TextWrapper.wordsep_re (letters = [^\d\W], word punctuation = [\w!"'&.,?]),
++// with Unicode classes in place of Python's Unicode-aware \w.
++const W = String.raw`[\p{L}\p{N}_]`;
++const LT = String.raw`[\p{L}_]`;
++const WP = String.raw`[\p{L}\p{N}_!"'&.,?]`;
++const WS = String.raw`[\t\n\x0b\x0c\r ]`;
++const WORDSEP = new RegExp(
++  `(${WS}+|(?<=${WP})-{2,}(?=${W})|[^\\t\\n\\x0b\\x0c\\r ]+?(?:-(?:(?<=${LT}{2}-)|(?<=${LT}-${LT}-))(?=${LT}-?${LT})|(?=${WS}|$)|(?<=${WP})(?=-{2,}${W})))`,
++  'u'
++);
++
++const isBlank = (chunk: string[]): boolean => chunk.join('').trim() === '';
++
++/** Python's textwrap.wrap(text, width) with its defaults (drop_whitespace, break_long_words, break_on_hyphens). */
++function pyWrap(text: string, width: number): string[] {
++  let col = 0;
++  let expanded = '';
++  for (const ch of text) {
++    // expandtabs(8)
++    if (ch === '\t') {
++      const n = 8 - (col % 8);
++      expanded += ' '.repeat(n);
++      col += n;
+     } else {
+-      chunks.push(
+-        ...part.replace(/([^\s\w]*\w+[^\W\d]-)(?=\w+[^\W\d])/g, '$1\u0001').split('\u0001')
+-      );
++      expanded += ch;
++      col = ch === '\n' || ch === '\r' ? 0 : col + 1;
+     }
+   }
++  const chunks = expanded
++    // eslint-disable-next-line no-control-regex -- Python's whitespace set includes \x0b and \x0c
++    .replace(/[\t\n\x0b\x0c\r]/g, ' ')
++    .split(WORDSEP)
++    .filter(Boolean)
++    .map((c) => codePoints(c));
+   const lines: string[] = [];
+-  let cur: string[] = [];
+-  let len = 0;
+-  const flush = () => {
+-    while (cur.length && cur[cur.length - 1] === ' ') {
+-      cur.pop();
++  let i = 0;
++  while (i < chunks.length) {
++    const cur: string[][] = [];
++    let curLen = 0;
++    if (isBlank(chunks[i]) && lines.length > 0) {
++      i++;
+     }
+-    lines.push(cur.join(''));
+-    cur = [];
+-    len = 0;
+-  };
+-  while (chunks.length) {
+-    const c = chunks[0];
+-    if (c === ' ' && !cur.length) {
+-      chunks.shift();
+-      continue;
++    while (i < chunks.length) {
++      const l = chunks[i].length;
++      if (curLen + l > width) {
++        break;
++      }
++      cur.push(chunks[i++]);
++      curLen += l;
+     }
+-    if (len + c.length <= chars) {
+-      cur.push(chunks.shift()!);
+-      len += c.length;
+-      continue;
++    if (i < chunks.length && chunks[i].length > width) {
++      const space = width < 1 ? 1 : width - curLen;
++      const chunk = chunks[i];
++      let end = space;
++      if (chunk.length > space) {
++        // break after the last hyphen if letters precede it
++        const hyphen = chunk.slice(0, space).lastIndexOf('-');
++        if (hyphen > 0 && chunk.slice(0, hyphen).some((c) => c !== '-')) {
++          end = hyphen + 1;
++        }
++      }
++      cur.push(chunk.slice(0, end));
++      chunks[i] = chunk.slice(end);
++      curLen = cur.reduce((n, c) => n + c.length, 0);
+     }
+-    if (c.length > chars && !cur.length) {
+-      cur.push(c.slice(0, chars));
+-      chunks[0] = c.slice(chars);
+-      flush();
+-      continue;
++    if (cur.length > 0 && isBlank(cur[cur.length - 1])) {
++      curLen -= cur[cur.length - 1].length;
++      cur.pop();
++    }
++    if (cur.length > 0) {
++      lines.push(cur.map((c) => c.join('')).join(''));
+     }
+-    flush();
+-  }
+-  if (cur.length) {
+-    flush();
+   }
+-  if (!lines.length) {
+-    lines.push('');
++  return lines;
++}
++
++/** scripts/render_landscape.py wrap_to_width: wrap to a width in inches, optionally to at most `maxLines`. */
++export function wrapToWidth(
++  s: string,
++  width: number,
++  size = FONT_SIZE,
++  maxLines: number | null = null
++): string[] {
++  const chars = Math.max(8, Math.floor(width / ((CHAR_WIDTH * size) / FONT_SIZE)));
++  let lines = pyWrap(s, chars);
++  if (lines.length === 0) {
++    lines = [''];
+   }
+   if (maxLines && lines.length > maxLines) {
+-    lines.length = maxLines;
+-    lines[maxLines - 1] = lines[maxLines - 1].slice(0, Math.max(1, chars - 1)).trimEnd() + '…';
++    lines = lines.slice(0, maxLines);
++    lines[maxLines - 1] = cpSlice(lines[maxLines - 1], 0, Math.max(1, chars - 1)).trimEnd() + '…';
+   }
+   return lines;
+ }
+ 
+ export function truncateToWidth(s: string, width: number, size = FONT_SIZE): string {
+   const chars = Math.max(4, Math.floor(width / ((CHAR_WIDTH * size) / FONT_SIZE)));
+-  return s.length <= chars ? s : s.slice(0, chars - 1).trimEnd() + '…';
++  return cpLen(s) <= chars ? s : cpSlice(s, 0, chars - 1).trimEnd() + '…';
+ }
+ 
+ // ---------------------------------------------------------------------------
+@@ -517,7 +554,7 @@ export function layoutInCell<T extends { key: string; fp: Footprint }>(
+     }
+   }
+   const [, height] = rowsExtent(best);
+-  const pos: Positions = {};
++  const pos: Positions = Object.create(null) as Positions;
+   let cy = height / 2;
+   for (const row of best) {
+     const up = Math.max(...row.map((it) => it.fp.up));
+@@ -619,7 +656,7 @@ export function placeUnits(units: readonly ContourUnit[], g: Grid, scale: number
+     }
+     byCell.get(k)!.push({ key: u.id, fp: markFootprint(u, { scale }), u });
+   }
+-  const out: Positions = {};
++  const out: Positions = Object.create(null) as Positions;
+   for (const items of byCell.values()) {
+     const { level, reversibility } = items[0].u;
+     const [cx, cy] = gridCentre(g, level, reversibility);
+@@ -641,7 +678,8 @@ export function drawPanel(
+ ): Positions {
+   drawGrid(cv, g, { rowLabels });
+   const pos = placeUnits(units, g, scale);
+-  for (const u of units) {
++  // Python draws the marks in id order
++  for (const u of [...units].sort((a, b) => compareStrings(a.id, b.id))) {
+     const [x, y] = pos[u.id];
+     drawMark(cv, x, y, u, { scale });
+   }
+diff --git a/packages/mermaid/src/diagrams/contour/contour.spec.ts b/packages/mermaid/src/diagrams/contour/contour.spec.ts
+index e7d5113..88888db 100644
+--- a/packages/mermaid/src/diagrams/contour/contour.spec.ts
++++ b/packages/mermaid/src/diagrams/contour/contour.spec.ts
+@@ -163,14 +163,26 @@ describe('contour parser', () => {
+         unit A "a" level=1 rev=R2 reach=S mode=0
+     `);
+     expect(year.getModel().panels.map((p) => p.units.length)).toEqual([1, 1]);
+-    await expect(
+-      parse(`contour-beta
++    // two panels may reuse an id: two organisations in V6, the same unit at the start and end in V2
++    const compare = await parse(`contour-beta
+       panel "Start"
+         unit A "a" ${U}
+       panel "End"
+         unit A "a" ${U}
+-    `)
+-    ).rejects.toThrow(/unit A is declared twice/);
++    `);
++    expect(compare.getModel().view).toBe('compare');
++    expect(compare.getModel().panels.map((p) => p.units.map((u) => u.id))).toEqual([['A'], ['A']]);
++  });
++
++  it('accepts the planned status, and rejects a level that is not a plain integer', async () => {
++    const db = await parse(`contour-beta\n unit A "a" ${U} status=planned`);
++    expect(db.getModel().panels[0].units[0].status).toBe('planned');
++    for (const level of ['0x1', '1.0', '1e0', '-0']) {
++      // the lexer already refuses these (`0x1` is the number 0 followed by the word x1)
++      await expect(
++        parse(`contour-beta\n unit A "a" level=${level} rev=R1 reach=S mode=0`)
++      ).rejects.toThrow();
++    }
+   });
+ 
+   it('rejects a missing required attribute, naming the unit', async () => {
+@@ -215,7 +227,7 @@ describe('contour parser', () => {
+ 
+   it('rejects a duplicate id, a repeated attribute and an unknown attribute', async () => {
+     await expect(parse(`contour-beta\n unit A "a" ${U}\n unit A "b" ${U}`)).rejects.toThrow(
+-      /unit A is declared twice/
++      /unit A is declared twice in this panel/
+     );
+     await expect(parse(`contour-beta\n unit A "a" ${U} colour=red`)).rejects.toThrow(
+       /unit A: unknown attribute colour/
+diff --git a/packages/mermaid/src/diagrams/contour/parser.ts b/packages/mermaid/src/diagrams/contour/parser.ts
+index 9650ba2..74d4e5e 100644
+--- a/packages/mermaid/src/diagrams/contour/parser.ts
++++ b/packages/mermaid/src/diagrams/contour/parser.ts
+@@ -98,8 +98,8 @@ const integer = (
+   min: number,
+   max: number
+ ): number => {
+-  const n = Number(value);
+-  if (value === undefined || !Number.isInteger(n) || n < min || n > max) {
++  const n = value !== undefined && /^\d+$/.test(value) ? Number(value) : NaN;
++  if (!Number.isInteger(n) || n < min || n > max) {
+     throw new Error(
+       `Contour ${subject}: ${key}=${value ?? ''} must be an integer from ${min} to ${max}.`
+     );
+@@ -257,19 +257,16 @@ export const buildModel = (ast: Contour): Omit<ContourModel, 'title'> => {
+     throw new Error(`Contour: view ${view} takes one panel.`);
+   }
+ 
+-  // Ids are unique; only the year view repeats an id, once in each of its two panels.
+-  const seen = new Set<string>();
+-  for (const [index, panel] of panels.entries()) {
++  // Ids are unique within a panel; two panels may reuse an id (two organisations in V6, the same unit at
++  // the start and the end in V2), as in the renderer the notation comes from.
++  for (const panel of panels) {
+     const inPanel = new Set<string>();
+     for (const unit of panel.units) {
+-      if (inPanel.has(unit.id) || (seen.has(unit.id) && view !== 'year')) {
+-        throw new Error(`Contour unit ${unit.id} is declared twice.`);
++      if (inPanel.has(unit.id)) {
++        throw new Error(`Contour unit ${unit.id} is declared twice in this panel.`);
+       }
+       inPanel.add(unit.id);
+     }
+-    if (index === 0 || view !== 'year') {
+-      inPanel.forEach((id) => seen.add(id));
+-    }
+   }
+ 
+   return { view, subtitle, footer, panels, suppliers };
+diff --git a/packages/mermaid/src/diagrams/contour/renderer.spec.ts b/packages/mermaid/src/diagrams/contour/renderer.spec.ts
+index 4098b4f..06970ec 100644
+--- a/packages/mermaid/src/diagrams/contour/renderer.spec.ts
++++ b/packages/mermaid/src/diagrams/contour/renderer.spec.ts
+@@ -186,15 +186,4 @@ describe('contour renderer', () => {
+       expect(xLeft).toBeGreaterThan(0);
+     });
+   });
+-
+-  describe('views that are not drawn yet', () => {
+-    it.each(['year', 'supply', 'decisions', 'evidence'])('says so for %s', async (view) => {
+-      const panels = `panel "One"\n unit A "a" ${U}\n${
+-        view === 'year' ? ' panel "Two"\n unit A "a" level=3 rev=R1 reach=S mode=3\n' : ''
+-      }`;
+-      await expect(renderContour(`contour-beta\n view ${view}\n ${panels}`)).rejects.toThrow(
+-        `contour: view ${view} is not implemented`
+-      );
+-    });
+-  });
+ });
+diff --git a/packages/mermaid/src/diagrams/contour/types.ts b/packages/mermaid/src/diagrams/contour/types.ts
+index 6b3dcad..ceab44c 100644
+--- a/packages/mermaid/src/diagrams/contour/types.ts
++++ b/packages/mermaid/src/diagrams/contour/types.ts
+@@ -7,7 +7,7 @@ export const IDENTITY = ['person', 'own'] as const;
+ export const POLICY = ['enforced', 'planned', 'none'] as const;
+ export const TIERS = ['T0', 'T1', 'T2', 'T3', 'T4'] as const;
+ export const EVIDENCE = ['automatic', 'attested', 'none'] as const;
+-export const STATUS = ['active', 'pilot', 'paused', 'retired'] as const;
++export const STATUS = ['active', 'planned', 'pilot', 'paused', 'retired'] as const;
+ export const HOSTING = [
+   'own-premises',
+   'eu-supplier',
+diff --git a/packages/mermaid/src/docs/syntax/contour.md b/packages/mermaid/src/docs/syntax/contour.md
+index 061be2f..33536a9 100644
+--- a/packages/mermaid/src/docs/syntax/contour.md
++++ b/packages/mermaid/src/docs/syntax/contour.md
+@@ -54,7 +54,7 @@ The keyword is `contour-beta`. Indentation is free. A diagram draws exactly one
+ | `subtitle "text"`                            | A line under the title. The text is a quoted string.                                                                                                                                          |
+ | `footer "text"`                              | A line at the foot of the diagram, for example a source or the word "Illustrative". Repeat the statement for more lines.                                                                      |
+ | `panel "Name"`                               | A group of units, normally one organisation. A diagram has at most two panels. Panels may be left out, in which case every unit belongs to one unnamed panel; the two styles cannot be mixed. |
+-| `unit ID "Name" key=value ...`               | One AI use. `ID` is a word or a number and must be unique within the diagram (see the year view for the one exception).                                                                       |
++| `unit ID "Name" key=value ...`               | One AI use. `ID` is a word or a number and must be unique within its panel. Two panels may reuse an id: the two organisations of the comparison view, and the same unit at the start and at the end in the year view.                                                                       |
+ | `action "name" N`                            | An action class of the unit above it, with its autonomy level `N` (0 to 4). Used by the decisions view.                                                                                       |
+ | `supplier ID "Label" ["Location"] key=value` | A supplier, with an optional location. Used by the supply view.                                                                                                                               |
+ 
+@@ -70,7 +70,7 @@ The keyword is `contour-beta`. Indentation is free. A diagram draws exactly one
+ | `policy`      | `enforced`, `planned`, `none`                                               | `none`              |
+ | `tier`        | `T0`, `T1`, `T2`, `T3`, `T4`                                                | `T0` (nobody named) |
+ | `evidence`    | `automatic`, `attested`, `none`                                             | `none`              |
+-| `status`      | `active`, `pilot`, `paused`, `retired`                                      | `active`            |
++| `status`      | `active`, `planned`, `pilot`, `paused`, `retired`                           | `active`            |
+ | `kinds`       | A comma-separated list of `logs`, `tests`, `gates`, `attestations`          | No kinds            |
+ | `hosting`     | `own-premises`, `eu-supplier`, `eea-supplier`, `non-eu-supplier`, `unknown` | `unknown`           |
+ | `operated_by` | `self`, `supplier`                                                          | `self`              |
+@@ -172,7 +172,7 @@ contour-beta
+ 
+ ### Compare (V6)
+ 
+-Two panels, two organisations, drawn side by side at identical scales with a shared legend. Nothing is rescaled to fit. Unit ids are unique across the diagram in this view.
++Two panels, two organisations, drawn side by side at identical scales with a shared legend. Nothing is rescaled to fit. Unit ids need only be unique within a panel, so the two organisations may reuse an id.
+ 
+ ```mermaid-example
+ contour-beta
+-- 
+2.43.0
+

@@ -1,0 +1,295 @@
+From a6f55defed3c747bc493a1412c9fffb636c0b2e9 Mon Sep 17 00:00:00 2001
+From: claude <noreply@anthropic.com>
+Date: Fri, 20 Nov 2026 22:57:07 +0000
+Subject: [PATCH 4/9] feat(contour): port the evidence view (V5) to TypeScript
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01NaoqrqKZqBgeQ8jRW9CsY4
+---
+ .../diagrams/contour/views/evidence.spec.ts   | 139 ++++++++++++++++++
+ .../src/diagrams/contour/views/evidence.ts    | 126 +++++++++++++++-
+ 2 files changed, 261 insertions(+), 4 deletions(-)
+ create mode 100644 packages/mermaid/src/diagrams/contour/views/evidence.spec.ts
+
+diff --git a/packages/mermaid/src/diagrams/contour/views/evidence.spec.ts b/packages/mermaid/src/diagrams/contour/views/evidence.spec.ts
+new file mode 100644
+index 0000000..68a0aa7
+--- /dev/null
++++ b/packages/mermaid/src/diagrams/contour/views/evidence.spec.ts
+@@ -0,0 +1,139 @@
++import { describe, expect, it } from 'vitest';
++import type { Canvas } from '../canvas.js';
++import { PAL } from '../common.js';
++import type { ContourModel, ContourUnit, Evidence, EvidenceKind } from '../types.js';
++import { layoutEvidence } from './evidence.js';
++
++const unit = (id: string, evidence: Evidence, kinds: EvidenceKind[], level = 2): ContourUnit => ({
++  id,
++  name: `Unit ${id}`,
++  level,
++  reversibility: 'R1',
++  reach: 'S',
++  mode: 3,
++  identity: 'person',
++  policy: 'none',
++  tier: 'T0',
++  evidence,
++  status: 'active',
++  kinds,
++  hosting: 'own-premises',
++  operatedBy: 'self',
++  suppliers: [],
++  actions: [],
++});
++
++const model = (units: ContourUnit[]): ContourModel => ({
++  view: 'evidence',
++  title: 'Evidence',
++  subtitle: '',
++  footer: [],
++  panels: [{ name: 'Test', units }],
++  suppliers: [],
++});
++
++const svgOf = (cv: Canvas): Element => {
++  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
++  cv.flush(svg);
++  return svg;
++};
++
++const texts = (svg: Element): (string | null)[] =>
++  [...svg.querySelectorAll('text')].map((t) => t.textContent);
++
++/** The cells of the grid: rects of the cell height, 0.3 - 2 * 0.055 inches. */
++const cells = (svg: Element): Element[] =>
++  [...svg.querySelectorAll('rect')].filter((r) => r.getAttribute('height') === '19');
++
++describe('contour evidence view (V5)', () => {
++  it('draws automatic kinds as filled cells', () => {
++    const svg = svgOf(layoutEvidence(model([unit('A', 'automatic', ['logs', 'tests', 'gates'])])));
++    const filled = cells(svg).filter((r) => r.getAttribute('fill') === PAL.automatic);
++    expect(filled).toHaveLength(3);
++    expect(svg.querySelectorAll('pattern')).toHaveLength(0);
++  });
++
++  it('draws an attested kind as a hatched cell', () => {
++    const svg = svgOf(layoutEvidence(model([unit('A', 'attested', ['attestations'])])));
++    const hatched = cells(svg).filter((r) => r.getAttribute('fill')?.startsWith('url(#'));
++    expect(hatched).toHaveLength(1);
++    const outlined = cells(svg).filter((r) => r.getAttribute('stroke') === PAL.attested);
++    expect(outlined).toHaveLength(1);
++  });
++
++  it('gives the red none cell to evidence none, and only then', () => {
++    const none = svgOf(layoutEvidence(model([unit('A', 'none', [])])));
++    expect(texts(none)).toContain('none');
++    expect(cells(none).filter((r) => r.getAttribute('stroke') === PAL.warning)).toHaveLength(1);
++    expect(texts(none).some((t) => t?.includes('kinds not recorded'))).toBe(false);
++    const other = svgOf(layoutEvidence(model([unit('A', 'automatic', ['logs'])])));
++    expect(texts(other)).not.toContain('none');
++    expect(cells(other).filter((r) => r.getAttribute('stroke') === PAL.warning)).toHaveLength(0);
++  });
++
++  it('notes that kinds are not recorded for a unit with evidence but no kinds', () => {
++    const svg = svgOf(layoutEvidence(model([unit('A', 'attested', [])])));
++    const note = [...svg.querySelectorAll('text')].find((t) =>
++      t.textContent?.includes('attested: kinds not recorded')
++    );
++    expect(note).toBeDefined();
++    expect(note?.getAttribute('font-style')).toBe('italic');
++    expect(cells(svg)).toHaveLength(0);
++  });
++
++  it('draws the baseline solid for automatic and dashed for attested', () => {
++    const baseline = (evidence: Evidence, kinds: EvidenceKind[], colour: string) =>
++      [...svgOf(layoutEvidence(model([unit('A', evidence, kinds)]))).querySelectorAll('polyline')]
++        .filter(
++          (p) => p.getAttribute('stroke') === colour && p.getAttribute('stroke-width') === '2.22'
++        )
++        .map((p) => p.getAttribute('stroke-dasharray'));
++    const automatic = baseline('automatic', ['logs'], PAL.automatic);
++    expect(automatic.length).toBeGreaterThan(0);
++    expect(automatic[0]).toBeNull();
++    const attested = baseline('attested', ['attestations'], PAL.attested);
++    expect(attested.some((d) => d !== null && d !== '')).toBe(true);
++    expect(baseline('none', [], PAL.automatic)).toHaveLength(0);
++  });
++
++  it('defines one hatch pattern per canvas however many cells are hatched', () => {
++    const units = ['A', 'B', 'C'].map((id) => unit(id, 'attested', ['attestations']));
++    const svg = svgOf(layoutEvidence(model(units)));
++    expect(cells(svg).filter((r) => r.getAttribute('fill')?.startsWith('url(#'))).toHaveLength(3);
++    expect(svg.querySelectorAll('pattern')).toHaveLength(1);
++  });
++
++  it('wraps the column headers to the column width', () => {
++    const svg = svgOf(layoutEvidence(model([unit('A', 'automatic', ['logs'])])));
++    const all = texts(svg);
++    expect(all).toContain('Logs');
++    expect(all).toContain('Attestations');
++    expect(all).not.toContain('Gates and policies as code');
++    expect(all).not.toContain('Tests and evaluations');
++    expect(all).toContain('Tests and');
++  });
++
++  it('grows the canvas with the number of units', () => {
++    const few = layoutEvidence(model([unit('A', 'automatic', ['logs'])]));
++    const many = layoutEvidence(
++      model(
++        Array.from({ length: 40 }, (_, i) =>
++          unit(`U${String(i).padStart(2, '0')}`, 'automatic', ['logs'])
++        )
++      )
++    );
++    expect(few.width).toBe(11);
++    expect(few.height).toBe(7.5);
++    expect(many.width).toBe(11);
++    expect(many.height).toBeGreaterThan(7.5);
++    expect(many.height * 2).toBe(Math.round(many.height * 2));
++  });
++
++  it('gives an empty view, not an error, for a view without units', () => {
++    const svg = svgOf(layoutEvidence(model([])));
++    expect(cells(svg)).toHaveLength(0);
++    expect(texts(svg)).toContain('Logs');
++    const noPanel = layoutEvidence({ ...model([]), panels: [] });
++    expect(noPanel.height).toBe(7.5);
++  });
++});
+diff --git a/packages/mermaid/src/diagrams/contour/views/evidence.ts b/packages/mermaid/src/diagrams/contour/views/evidence.ts
+index 98b8872..c5932a3 100644
+--- a/packages/mermaid/src/diagrams/contour/views/evidence.ts
++++ b/packages/mermaid/src/diagrams/contour/views/evidence.ts
+@@ -1,7 +1,125 @@
+-import type { Canvas } from '../canvas.js';
++// cspell:ignore zorder
++import { Canvas } from '../canvas.js';
++import {
++  AUTOMATIC_KINDS,
++  COL_LABEL_HEIGHT,
++  EVIDENCE_COLUMNS,
++  FIG_H,
++  FIG_W,
++  FOOTER_BAND,
++  LABEL_AREA,
++  LEGEND_BOTTOM,
++  LEGEND_TOP,
++  LEGEND_WIDTH,
++  MARGIN,
++  MINI_RADIUS,
++  PAL,
++  ROW_PITCH_EVIDENCE,
++  TITLE_BAND,
++  drawBackground,
++  drawLegend,
++  drawTitleFooter,
++  rowLabel,
++  rowOrder,
++  wrapToWidth,
++} from '../common.js';
+ import type { ContourModel } from '../types.js';
+ 
+-/** V5 The evidence view. */
+-export function layoutEvidence(_model: ContourModel): Canvas {
+-  throw new Error('contour: view evidence is not implemented');
++/** V5 The evidence view: one row per unit, one column per kind of evidence. The page grows with the rows. */
++export function layoutEvidence(model: ContourModel): Canvas {
++  const units = rowOrder(model.panels[0]?.units ?? []);
++  const needed =
++    TITLE_BAND + COL_LABEL_HEIGHT + 0.12 + units.length * ROW_PITCH_EVIDENCE + 0.15 + FOOTER_BAND;
++  const cv = new Canvas(FIG_W, Math.max(FIG_H, Math.ceil(needed * 2) / 2));
++  drawBackground(cv);
++  drawTitleFooter(cv, model);
++  const gridLeft = MARGIN + LABEL_AREA;
++  const gridRight = cv.width - MARGIN - LEGEND_WIDTH - 0.3;
++  const cw = (gridRight - gridLeft) / EVIDENCE_COLUMNS.length;
++  const top = cv.height - TITLE_BAND - COL_LABEL_HEIGHT - 0.12;
++  EVIDENCE_COLUMNS.forEach(([, name], i) => {
++    const cx = gridLeft + (i + 0.5) * cw;
++    wrapToWidth(name, cw - 0.08).forEach((t, k) => {
++      cv.text(cx, top + 0.46 - k * 0.15, t, { ha: 'center', weight: 'bold' });
++    });
++  });
++  const bottom = top - units.length * ROW_PITCH_EVIDENCE;
++  for (let i = 0; i <= EVIDENCE_COLUMNS.length; i++) {
++    cv.line([gridLeft + i * cw, gridLeft + i * cw], [bottom, top], {
++      colour: PAL.grid,
++      lw: 0.6,
++      zorder: 1,
++    });
++  }
++  cv.line([MARGIN, gridRight], [top, top], { colour: PAL.grid, lw: 0.8, zorder: 1 });
++  let y = top;
++  const insetX = 0.1;
++  const insetY = 0.055;
++  for (const u of units) {
++    const rowY = y - ROW_PITCH_EVIDENCE / 2;
++    rowLabel(cv, rowY, u, gridLeft - 0.1);
++    const baseY = rowY - MINI_RADIUS - 0.045;
++    if (u.evidence === 'automatic') {
++      cv.line([MARGIN + 0.02, MARGIN + 0.18], [baseY, baseY], { colour: PAL.automatic, lw: 1.6 });
++    } else if (u.evidence === 'attested') {
++      cv.line([MARGIN + 0.02, MARGIN + 0.18], [baseY, baseY], {
++        colour: PAL.attested,
++        lw: 1.6,
++        dashes: [3, 2],
++      });
++    }
++    EVIDENCE_COLUMNS.forEach(([kind], i) => {
++      const x0 = gridLeft + i * cw;
++      const cellY = rowY - ROW_PITCH_EVIDENCE / 2 + insetY;
++      const cellH = ROW_PITCH_EVIDENCE - 2 * insetY;
++      if (kind === 'none') {
++        if (u.evidence === 'none') {
++          cv.rect(x0 + insetX, cellY, cw - 2 * insetX, cellH, {
++            face: 'none',
++            edge: PAL.warning,
++            lw: 1.0,
++            zorder: 2,
++          });
++          cv.text(x0 + cw / 2, rowY, 'none', {
++            colour: PAL.warning,
++            ha: 'center',
++            weight: 'bold',
++            zorder: 5,
++          });
++        }
++        return;
++      }
++      if (!u.kinds.includes(kind)) {
++        return;
++      }
++      if (AUTOMATIC_KINDS.includes(kind)) {
++        cv.rect(x0 + insetX, cellY, cw - 2 * insetX, cellH, { face: PAL.automatic, zorder: 2 });
++      } else {
++        cv.rect(x0 + insetX, cellY, cw - 2 * insetX, cellH, {
++          face: PAL.background,
++          edge: PAL.attested,
++          lw: 0.8,
++          hatch: PAL.attested,
++          zorder: 2,
++        });
++      }
++    });
++    if (!u.kinds.length && u.evidence !== 'none') {
++      cv.text(gridLeft + 2 * cw, rowY, `${u.evidence}: kinds not recorded`, {
++        colour: PAL.muted,
++        ha: 'center',
++        style: 'italic',
++      });
++    }
++    y -= ROW_PITCH_EVIDENCE;
++    cv.line([MARGIN, gridRight], [y, y], { colour: PAL.grid, lw: 0.6, zorder: 1 });
++  }
++  drawLegend(
++    cv,
++    cv.width - MARGIN - LEGEND_WIDTH,
++    cv.height - LEGEND_TOP,
++    LEGEND_BOTTOM,
++    LEGEND_WIDTH
++  );
++  return cv;
+ }
+-- 
+2.43.0
+

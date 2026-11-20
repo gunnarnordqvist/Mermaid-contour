@@ -1,0 +1,37 @@
+From 1b8b719f714ad6aeb3047e31b0d0bf67c5f11ad0 Mon Sep 17 00:00:00 2001
+From: claude <noreply@anthropic.com>
+Date: Fri, 20 Nov 2026 22:58:10 +0000
+Subject: [PATCH 5/9] contour-beta: one hatch pattern per colour and canvas
+
+---
+ packages/mermaid/src/diagrams/contour/canvas.ts | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/packages/mermaid/src/diagrams/contour/canvas.ts b/packages/mermaid/src/diagrams/contour/canvas.ts
+index e043742..5a5e1c5 100644
+--- a/packages/mermaid/src/diagrams/contour/canvas.ts
++++ b/packages/mermaid/src/diagrams/contour/canvas.ts
+@@ -66,6 +66,7 @@ export class Canvas {
+   public readonly height: number;
+   private readonly items: Item[] = [];
+   private readonly defs: Element[] = [];
++  private readonly patterns = new Map<string, string>();
+ 
+   public constructor(width: number, height: number) {
+     this.width = width;
+@@ -74,7 +75,12 @@ export class Canvas {
+ 
+   /** matplotlib's hatch '////': 12 diagonal lines per inch tile, anchored at the canvas's bottom left. */
+   public hatchPattern(colour: string): string {
++    const known = this.patterns.get(colour);
++    if (known !== undefined) {
++      return known;
++    }
+     const id = `contour-hatch-${++patternCounter}`;
++    this.patterns.set(colour, id);
+     const pattern = document.createElementNS(NS, 'pattern');
+     const patternAttributes: SvgAttributes = {
+       id,
+-- 
+2.43.0
+

@@ -1,0 +1,674 @@
+From 059470a17ccfe5ffeadd10820be55d9741ee33c4 Mon Sep 17 00:00:00 2001
+From: claude <noreply@anthropic.com>
+Date: Fri, 20 Nov 2026 22:21:54 +0000
+Subject: [PATCH 1/9] contour-beta: V1-only proof of concept (baseline for the
+ full port)
+
+---
+ .../src/diagram-api/diagram-orchestration.ts  |   2 +
+ .../src/diagrams/contour/contour.spec.ts      |  40 +++++++
+ packages/mermaid/src/diagrams/contour/db.ts   |  38 ++++++
+ .../mermaid/src/diagrams/contour/detector.ts  |  22 ++++
+ .../mermaid/src/diagrams/contour/diagram.ts   |  14 +++
+ .../mermaid/src/diagrams/contour/parser.ts    |  78 +++++++++++++
+ .../mermaid/src/diagrams/contour/renderer.ts  | 109 ++++++++++++++++++
+ .../mermaid/src/diagrams/contour/styles.ts    |  15 +++
+ .../mermaid/src/diagrams/contour/types.ts     |  29 +++++
+ packages/parser/langium-config.json           |   5 +
+ .../src/language/contour/contour.langium      |  22 ++++
+ packages/parser/src/language/contour/index.ts |   1 +
+ .../parser/src/language/contour/module.ts     |  80 +++++++++++++
+ .../src/language/contour/tokenBuilder.ts      |   7 ++
+ packages/parser/src/language/index.ts         |   6 +
+ packages/parser/src/parse.ts                  |   8 ++
+ 16 files changed, 476 insertions(+)
+ create mode 100644 packages/mermaid/src/diagrams/contour/contour.spec.ts
+ create mode 100644 packages/mermaid/src/diagrams/contour/db.ts
+ create mode 100644 packages/mermaid/src/diagrams/contour/detector.ts
+ create mode 100644 packages/mermaid/src/diagrams/contour/diagram.ts
+ create mode 100644 packages/mermaid/src/diagrams/contour/parser.ts
+ create mode 100644 packages/mermaid/src/diagrams/contour/renderer.ts
+ create mode 100644 packages/mermaid/src/diagrams/contour/styles.ts
+ create mode 100644 packages/mermaid/src/diagrams/contour/types.ts
+ create mode 100644 packages/parser/src/language/contour/contour.langium
+ create mode 100644 packages/parser/src/language/contour/index.ts
+ create mode 100644 packages/parser/src/language/contour/module.ts
+ create mode 100644 packages/parser/src/language/contour/tokenBuilder.ts
+
+diff --git a/packages/mermaid/src/diagram-api/diagram-orchestration.ts b/packages/mermaid/src/diagram-api/diagram-orchestration.ts
+index 0425f00..c95b503 100644
+--- a/packages/mermaid/src/diagram-api/diagram-orchestration.ts
++++ b/packages/mermaid/src/diagram-api/diagram-orchestration.ts
+@@ -21,6 +21,7 @@ import mindmap from '../diagrams/mindmap/detector.js';
+ import kanban from '../diagrams/kanban/detector.js';
+ import sankey from '../diagrams/sankey/sankeyDetector.js';
+ import { packet } from '../diagrams/packet/detector.js';
++import { contour } from '../diagrams/contour/detector.js';
+ import { radar } from '../diagrams/radar/detector.js';
+ import block from '../diagrams/block/blockDetector.js';
+ import treeView from '../diagrams/treeView/detector.js';
+@@ -107,6 +108,7 @@ export const addDiagrams = () => {
+     quadrantChart,
+     sankey,
+     packet,
++    contour,
+     xychart,
+     block,
+     eventmodeling,
+diff --git a/packages/mermaid/src/diagrams/contour/contour.spec.ts b/packages/mermaid/src/diagrams/contour/contour.spec.ts
+new file mode 100644
+index 0000000..f3c6279
+--- /dev/null
++++ b/packages/mermaid/src/diagrams/contour/contour.spec.ts
+@@ -0,0 +1,40 @@
++import { describe, expect, it } from 'vitest';
++import { parser } from './parser.js';
++import { ContourDB } from './db.js';
++
++const parse = async (input: string) => {
++  const db = new ContourDB();
++  parser.parser = { yy: db } as never;
++  await parser.parse(input);
++  return db;
++};
++
++describe('contour', () => {
++  it('parses a title and units', async () => {
++    const db = await parse(`contour-beta
++      title Mini landscape
++      unit NR-BT "Benefits triage" level=0 rev=R3 reach=XL mode=4 identity=own policy=enforced tier=T2 evidence=automatic
++      unit NR-SA "Staff assistant" level=1 rev=R1 reach=L mode=0
++    `);
++    expect(db.getDiagramTitle()).toBe('Mini landscape');
++    const [a, b] = db.getUnits();
++    expect(a).toMatchObject({ id: 'NR-BT', level: 0, reversibility: 3, reach: 'XL', mode: 4, identity: 'own', policy: 'enforced', tier: 'T2', evidence: 'automatic' });
++    // absences stay absences
++    expect(b).toMatchObject({ identity: 'person', policy: 'none', tier: 'T0', evidence: 'none' });
++  });
++
++  it('rejects a missing required attribute', async () => {
++    await expect(parse(`contour-beta\n unit A "a" level=0 rev=R1 reach=S`)).rejects.toThrow(/lacks the required attribute mode/);
++  });
++
++  it('rejects values outside the scale', async () => {
++    await expect(parse(`contour-beta\n unit A "a" level=5 rev=R1 reach=S mode=0`)).rejects.toThrow(/level=5/);
++    await expect(parse(`contour-beta\n unit A "a" level=0 rev=R9 reach=S mode=0`)).rejects.toThrow(/rev=R9/);
++  });
++
++  it('rejects a duplicate id and an unknown attribute', async () => {
++    const u = 'level=0 rev=R1 reach=S mode=0';
++    await expect(parse(`contour-beta\n unit A "a" ${u}\n unit A "b" ${u}`)).rejects.toThrow(/twice/);
++    await expect(parse(`contour-beta\n unit A "a" ${u} colour=red`)).rejects.toThrow(/unknown attribute/);
++  });
++});
+diff --git a/packages/mermaid/src/diagrams/contour/db.ts b/packages/mermaid/src/diagrams/contour/db.ts
+new file mode 100644
+index 0000000..479c3b0
+--- /dev/null
++++ b/packages/mermaid/src/diagrams/contour/db.ts
+@@ -0,0 +1,38 @@
++import type { DiagramDB } from '../../diagram-api/types.js';
++import {
++  clear as commonClear,
++  getAccDescription,
++  getAccTitle,
++  getDiagramTitle,
++  setAccDescription,
++  setAccTitle,
++  setDiagramTitle,
++} from '../common/commonDb.js';
++import type { ContourUnit } from './types.js';
++
++export class ContourDB implements DiagramDB {
++  private units: ContourUnit[] = [];
++
++  public addUnit(unit: ContourUnit) {
++    if (this.units.some((u) => u.id === unit.id)) {
++      throw new Error(`Contour unit "${unit.id}" is declared twice.`);
++    }
++    this.units.push(unit);
++  }
++
++  public getUnits() {
++    return this.units;
++  }
++
++  public clear() {
++    commonClear();
++    this.units = [];
++  }
++
++  public setAccTitle = setAccTitle;
++  public getAccTitle = getAccTitle;
++  public setDiagramTitle = setDiagramTitle;
++  public getDiagramTitle = getDiagramTitle;
++  public getAccDescription = getAccDescription;
++  public setAccDescription = setAccDescription;
++}
+diff --git a/packages/mermaid/src/diagrams/contour/detector.ts b/packages/mermaid/src/diagrams/contour/detector.ts
+new file mode 100644
+index 0000000..6672965
+--- /dev/null
++++ b/packages/mermaid/src/diagrams/contour/detector.ts
+@@ -0,0 +1,22 @@
++import type {
++  DiagramDetector,
++  DiagramLoader,
++  ExternalDiagramDefinition,
++} from '../../diagram-api/types.js';
++
++const id = 'contour';
++
++const detector: DiagramDetector = (txt) => {
++  return /^\s*contour-beta/.test(txt);
++};
++
++const loader: DiagramLoader = async () => {
++  const { diagram } = await import('./diagram.js');
++  return { id, diagram };
++};
++
++export const contour: ExternalDiagramDefinition = {
++  id,
++  detector,
++  loader,
++};
+diff --git a/packages/mermaid/src/diagrams/contour/diagram.ts b/packages/mermaid/src/diagrams/contour/diagram.ts
+new file mode 100644
+index 0000000..17eabcd
+--- /dev/null
++++ b/packages/mermaid/src/diagrams/contour/diagram.ts
+@@ -0,0 +1,14 @@
++import type { DiagramDefinition } from '../../diagram-api/types.js';
++import { ContourDB } from './db.js';
++import { parser } from './parser.js';
++import { renderer } from './renderer.js';
++import { styles } from './styles.js';
++
++export const diagram: DiagramDefinition = {
++  parser,
++  get db() {
++    return new ContourDB();
++  },
++  renderer,
++  styles,
++};
+diff --git a/packages/mermaid/src/diagrams/contour/parser.ts b/packages/mermaid/src/diagrams/contour/parser.ts
+new file mode 100644
+index 0000000..1709b6d
+--- /dev/null
++++ b/packages/mermaid/src/diagrams/contour/parser.ts
+@@ -0,0 +1,78 @@
++import type { Contour } from '@mermaid-js/parser';
++import { parse } from '@mermaid-js/parser';
++import type { ParserDefinition } from '../../diagram-api/types.js';
++import { log } from '../../logger.js';
++import { populateCommonDb } from '../common/populateCommonDb.js';
++import { ContourDB } from './db.js';
++import type { ContourUnit } from './types.js';
++import { EVIDENCE, IDENTITY, POLICY, REACH, REVERSIBILITY, TIERS } from './types.js';
++
++const oneOf = <T extends string>(unit: string, key: string, value: string, allowed: readonly T[]) => {
++  if (!(allowed as readonly string[]).includes(value)) {
++    throw new Error(`Contour unit ${unit}: ${key}=${value} is not one of ${allowed.join(', ')}.`);
++  }
++  return value as T;
++};
++
++const int = (unit: string, key: string, value: string, min: number, max: number) => {
++  const n = Number(value);
++  if (!Number.isInteger(n) || n < min || n > max) {
++    throw new Error(`Contour unit ${unit}: ${key}=${value} must be an integer from ${min} to ${max}.`);
++  }
++  return n;
++};
++
++const populate = (ast: Contour, db: ContourDB) => {
++  populateCommonDb(ast, db);
++  for (const { id, name, attrs } of ast.units) {
++    const a: Record<string, string> = {};
++    for (const { key, value } of attrs) {
++      if (key in a) {
++        throw new Error(`Contour unit ${id}: ${key} is given twice.`);
++      }
++      a[key] = String(value);
++    }
++    for (const required of ['level', 'rev', 'reach', 'mode']) {
++      if (!(required in a)) {
++        throw new Error(`Contour unit ${id} lacks the required attribute ${required}.`);
++      }
++    }
++    const known = ['level', 'rev', 'reach', 'mode', 'identity', 'policy', 'tier', 'evidence'];
++    for (const key of Object.keys(a)) {
++      if (!known.includes(key)) {
++        throw new Error(`Contour unit ${id}: unknown attribute ${key}. Known: ${known.join(', ')}.`);
++      }
++    }
++    // Absences are drawn as absences: an unknown value is "none", not a guess.
++    const unit: ContourUnit = {
++      id,
++      name,
++      level: int(id, 'level', a.level, 0, 4),
++      reversibility: REVERSIBILITY.indexOf(oneOf(id, 'rev', a.rev, REVERSIBILITY)) + 1,
++      reach: oneOf(id, 'reach', a.reach, REACH),
++      mode: int(id, 'mode', a.mode, 0, 5),
++      identity: oneOf(id, 'identity', a.identity ?? 'person', IDENTITY),
++      policy: oneOf(id, 'policy', a.policy ?? 'none', POLICY),
++      tier: oneOf(id, 'tier', a.tier ?? 'T0', TIERS),
++      evidence: oneOf(id, 'evidence', a.evidence ?? 'none', EVIDENCE),
++    };
++    log.debug('Contour unit', unit);
++    db.addUnit(unit);
++  }
++};
++
++export const parser: ParserDefinition = {
++  // @ts-expect-error - ContourDB is not assignable to DiagramDB
++  parser: { yy: undefined },
++  parse: async (input: string): Promise<void> => {
++    const ast: Contour = await parse('contour', input);
++    const db = parser.parser?.yy;
++    if (!(db instanceof ContourDB)) {
++      throw new Error(
++        'parser.parser?.yy was not a ContourDB. This is due to a bug within Mermaid, please report this issue at https://github.com/mermaid-js/mermaid/issues.'
++      );
++    }
++    log.debug(ast);
++    populate(ast, db);
++  },
++};
+diff --git a/packages/mermaid/src/diagrams/contour/renderer.ts b/packages/mermaid/src/diagrams/contour/renderer.ts
+new file mode 100644
+index 0000000..362d48e
+--- /dev/null
++++ b/packages/mermaid/src/diagrams/contour/renderer.ts
+@@ -0,0 +1,109 @@
++import type { Diagram } from '../../Diagram.js';
++import type { DiagramRenderer, DrawDefinition, SVG } from '../../diagram-api/types.js';
++import { selectSvgElement } from '../../rendering-util/selectSvgElement.js';
++import { configureSvgSize } from '../../setupGraphViewbox.js';
++import type { ContourDB, ContourUnit } from './types.js';
++
++const LEVELS = ['Advisory', 'Assisted', 'Supervised', 'Bounded', 'Autonomous'];
++const ROWS = ['R1 Reversible at once', 'R2', 'R3', 'R4 Irreversible'];
++const HALF_SIZE = { S: 7, M: 10, L: 14, XL: 19 };
++const MODE_COLOURS = ['#7890B0', '#3B82F6', '#40A090', '#C88000', '#1B3A7A', '#B2367D'];
++
++const LEFT = 130;
++const TOP = 50;
++const CELL_W = 120;
++const CELL_H = 90;
++const WIDTH = LEFT + CELL_W * 5 + 10;
++const HEIGHT = TOP + CELL_H * 4 + 10;
++
++const draw: DrawDefinition = (_text, id, _version, diagram: Diagram) => {
++  const db = diagram.db as ContourDB;
++  const svg: SVG = selectSvgElement(id);
++  svg.attr('viewBox', `0 0 ${WIDTH} ${HEIGHT}`);
++  configureSvgSize(svg, HEIGHT, WIDTH, true);
++
++  svg
++    .append('text')
++    .attr('x', LEFT)
++    .attr('y', 22)
++    .attr('class', 'contourTitle')
++    .text(db.getDiagramTitle());
++
++  LEVELS.forEach((name, c) => {
++    svg
++      .append('text')
++      .attr('x', LEFT + CELL_W * c + CELL_W / 2)
++      .attr('y', TOP - 8)
++      .attr('text-anchor', 'middle')
++      .attr('class', 'contourAxis')
++      .text(`Level ${c} ${name}`);
++  });
++  ROWS.forEach((name, r) => {
++    svg
++      .append('text')
++      .attr('x', LEFT - 8)
++      .attr('y', TOP + CELL_H * r + CELL_H / 2)
++      .attr('text-anchor', 'end')
++      .attr('class', 'contourAxis')
++      .text(name);
++  });
++  for (let c = 0; c < 5; c++) {
++    for (let r = 0; r < 4; r++) {
++      svg
++        .append('rect')
++        .attr('x', LEFT + CELL_W * c)
++        .attr('y', TOP + CELL_H * r)
++        .attr('width', CELL_W)
++        .attr('height', CELL_H)
++        .attr('class', c === 4 && r >= 2 ? 'contourEmptyCorner' : 'contourCell');
++    }
++  }
++
++  const cells = new Map<string, ContourUnit[]>();
++  for (const u of db.getUnits()) {
++    const key = `${u.level},${u.reversibility}`;
++    cells.set(key, [...(cells.get(key) ?? []), u]);
++  }
++  for (const units of cells.values()) {
++    units.forEach((u, i) => {
++      const x = LEFT + CELL_W * u.level + (CELL_W / (units.length + 1)) * (i + 1);
++      const y = TOP + CELL_H * (u.reversibility - 1) + CELL_H / 2;
++      drawMark(svg, u, x, y);
++    });
++  }
++};
++
++const drawMark = (svg: SVG, u: ContourUnit, x: number, y: number) => {
++  const s = HALF_SIZE[u.reach];
++  const g = svg.append('g').attr('data-unit', u.id);
++  const fill = MODE_COLOURS[u.mode];
++  if (u.identity === 'own') {
++    g.append('rect')
++      .attr('x', x - s).attr('y', y - s).attr('width', 2 * s).attr('height', 2 * s)
++      .attr('rx', 4).attr('fill', fill).attr('class', 'contourMark');
++  } else {
++    g.append('circle').attr('cx', x).attr('cy', y).attr('r', s).attr('fill', fill).attr('class', 'contourMark');
++  }
++  g.append('text').attr('x', x).attr('y', y + 4).attr('text-anchor', 'middle')
++    .attr('class', 'contourDigit').text(u.mode);
++  if (u.policy !== 'none') {
++    g.append('path')
++      .attr('d', `M${x + s} ${y - s - 7} l6 6 l-6 6 l-6 -6 z`)
++      .attr('fill', u.policy === 'enforced' ? '#111827' : 'none')
++      .attr('class', 'contourDiamond');
++  }
++  if (u.tier !== 'T0') {
++    g.append('text').attr('x', x - s - 4).attr('y', y - s).attr('text-anchor', 'end')
++      .attr('class', 'contourSeat').text(u.tier);
++  }
++  if (u.evidence !== 'none') {
++    g.append('line')
++      .attr('x1', x - s).attr('x2', x + s).attr('y1', y + s + 4).attr('y2', y + s + 4)
++      .attr('stroke-dasharray', u.evidence === 'attested' ? '3 2' : null)
++      .attr('class', 'contourBaseline');
++  }
++  g.append('text').attr('x', x).attr('y', y + s + 16).attr('text-anchor', 'middle')
++    .attr('class', 'contourId').text(u.id);
++};
++
++export const renderer: DiagramRenderer = { draw };
+diff --git a/packages/mermaid/src/diagrams/contour/styles.ts b/packages/mermaid/src/diagrams/contour/styles.ts
+new file mode 100644
+index 0000000..496eee4
+--- /dev/null
++++ b/packages/mermaid/src/diagrams/contour/styles.ts
+@@ -0,0 +1,15 @@
++import type { DiagramStylesProvider } from '../../diagram-api/types.js';
++
++export const styles: DiagramStylesProvider = () => `
++	.contourTitle { font-size: 16px; font-weight: 600; fill: #111827; }
++	.contourAxis { font-size: 10px; fill: #374151; }
++	.contourCell { fill: none; stroke: #d1d5db; }
++	.contourEmptyCorner { fill: #fef2f2; stroke: #d1d5db; }
++	.contourMark { stroke: #111827; }
++	.contourDigit { font-size: 11px; font-weight: 700; fill: #111827; }
++	.contourId, .contourSeat { font-size: 9px; fill: #374151; }
++	.contourDiamond { stroke: #111827; }
++	.contourBaseline { stroke: #111827; stroke-width: 2; }
++`;
++
++export default styles;
+diff --git a/packages/mermaid/src/diagrams/contour/types.ts b/packages/mermaid/src/diagrams/contour/types.ts
+new file mode 100644
+index 0000000..4d23b3b
+--- /dev/null
++++ b/packages/mermaid/src/diagrams/contour/types.ts
+@@ -0,0 +1,29 @@
++import type { DiagramDBBase } from '../../diagram-api/types.js';
++
++export const REVERSIBILITY = ['R1', 'R2', 'R3', 'R4'] as const;
++export const REACH = ['S', 'M', 'L', 'XL'] as const;
++export const IDENTITY = ['person', 'own'] as const;
++export const POLICY = ['enforced', 'planned', 'none'] as const;
++export const TIERS = ['T0', 'T1', 'T2', 'T3', 'T4'] as const;
++export const EVIDENCE = ['automatic', 'attested', 'none'] as const;
++
++export interface ContourUnit {
++  id: string;
++  name: string;
++  /** Autonomy level, 0 (Advisory) to 4 (Autonomous). */
++  level: number;
++  /** Reversibility tier, 1 (R1) to 4 (R4). */
++  reversibility: number;
++  reach: (typeof REACH)[number];
++  /** Usage mode, 0 (Ambient AI) to 5 (Autonomous production agents). */
++  mode: number;
++  identity: (typeof IDENTITY)[number];
++  policy: (typeof POLICY)[number];
++  tier: (typeof TIERS)[number];
++  evidence: (typeof EVIDENCE)[number];
++}
++
++export interface ContourDB extends DiagramDBBase<Record<string, never>> {
++  addUnit: (unit: ContourUnit) => void;
++  getUnits: () => ContourUnit[];
++}
+diff --git a/packages/parser/langium-config.json b/packages/parser/langium-config.json
+index e465fb2..9eb8dc2 100644
+--- a/packages/parser/langium-config.json
++++ b/packages/parser/langium-config.json
+@@ -11,6 +11,11 @@
+       "grammar": "src/language/packet/packet.langium",
+       "fileExtensions": [".mmd", ".mermaid"]
+     },
++    {
++      "id": "contour",
++      "grammar": "src/language/contour/contour.langium",
++      "fileExtensions": [".mmd", ".mermaid"]
++    },
+     {
+       "id": "pie",
+       "grammar": "src/language/pie/pie.langium",
+diff --git a/packages/parser/src/language/contour/contour.langium b/packages/parser/src/language/contour/contour.langium
+new file mode 100644
+index 0000000..ae4385b
+--- /dev/null
++++ b/packages/parser/src/language/contour/contour.langium
+@@ -0,0 +1,22 @@
++grammar ContourGrammar
++import "../common/common";
++
++entry Contour:
++  NEWLINE*
++  "contour-beta"
++  (
++    TitleAndAccessibilities
++    | units+=ContourUnit
++    | NEWLINE
++  )*
++;
++
++ContourUnit:
++  "unit" id=ID name=STRING (attrs+=ContourAttr)* EOL
++;
++
++ContourAttr:
++  key=ID '=' value=ContourValue
++;
++
++ContourValue returns string: ID | INT;
+diff --git a/packages/parser/src/language/contour/index.ts b/packages/parser/src/language/contour/index.ts
+new file mode 100644
+index 0000000..fd3c604
+--- /dev/null
++++ b/packages/parser/src/language/contour/index.ts
+@@ -0,0 +1 @@
++export * from './module.js';
+diff --git a/packages/parser/src/language/contour/module.ts b/packages/parser/src/language/contour/module.ts
+new file mode 100644
+index 0000000..05543be
+--- /dev/null
++++ b/packages/parser/src/language/contour/module.ts
+@@ -0,0 +1,80 @@
++import type {
++  DefaultSharedCoreModuleContext,
++  LangiumCoreServices,
++  LangiumSharedCoreServices,
++  Module,
++  PartialLangiumCoreServices,
++} from 'langium';
++import {
++  EmptyFileSystem,
++  createDefaultCoreModule,
++  createDefaultSharedCoreModule,
++  inject,
++} from 'langium';
++
++import { CommonValueConverter } from '../common/valueConverter.js';
++import {
++  MermaidGeneratedSharedModule,
++  ContourGrammarGeneratedModule as ContourGeneratedModule,
++} from '../generated/module.js';
++import { ContourTokenBuilder } from './tokenBuilder.js';
++
++/**
++ * Declaration of `Contour` services.
++ */
++interface ContourAddedServices {
++  parser: {
++    TokenBuilder: ContourTokenBuilder;
++    ValueConverter: CommonValueConverter;
++  };
++}
++
++/**
++ * Union of Langium default services and `Contour` services.
++ */
++export type ContourServices = LangiumCoreServices & ContourAddedServices;
++
++/**
++ * Dependency injection module that overrides Langium default services and
++ * contributes the declared `Contour` services.
++ */
++export const ContourModule: Module<
++  ContourServices,
++  PartialLangiumCoreServices & ContourAddedServices
++> = {
++  parser: {
++    TokenBuilder: () => new ContourTokenBuilder(),
++    ValueConverter: () => new CommonValueConverter(),
++  },
++};
++
++/**
++ * Create the full set of services required by Langium.
++ *
++ * First inject the shared services by merging two modules:
++ *  - Langium default shared services
++ *  - Services generated by langium-cli
++ *
++ * Then inject the language-specific services by merging three modules:
++ *  - Langium default language-specific services
++ *  - Services generated by langium-cli
++ *  - Services specified in this file
++ * @param context - Optional module context with the LSP connection
++ * @returns An object wrapping the shared services and the language-specific services
++ */
++export function createContourServices(context: DefaultSharedCoreModuleContext = EmptyFileSystem): {
++  shared: LangiumSharedCoreServices;
++  Contour: ContourServices;
++} {
++  const shared: LangiumSharedCoreServices = inject(
++    createDefaultSharedCoreModule(context),
++    MermaidGeneratedSharedModule
++  );
++  const Contour: ContourServices = inject(
++    createDefaultCoreModule({ shared }),
++    ContourGeneratedModule,
++    ContourModule
++  );
++  shared.ServiceRegistry.register(Contour);
++  return { shared, Contour };
++}
+diff --git a/packages/parser/src/language/contour/tokenBuilder.ts b/packages/parser/src/language/contour/tokenBuilder.ts
+new file mode 100644
+index 0000000..18c53e3
+--- /dev/null
++++ b/packages/parser/src/language/contour/tokenBuilder.ts
+@@ -0,0 +1,7 @@
++import { AbstractMermaidTokenBuilder } from '../common/index.js';
++
++export class ContourTokenBuilder extends AbstractMermaidTokenBuilder {
++  public constructor() {
++    super(['contour-beta']);
++  }
++}
+diff --git a/packages/parser/src/language/index.ts b/packages/parser/src/language/index.ts
+index 879ca8d..8eb5559 100644
+--- a/packages/parser/src/language/index.ts
++++ b/packages/parser/src/language/index.ts
+@@ -2,6 +2,10 @@ export {
+   Info,
+   MermaidAstType,
+   Packet,
++  Contour,
++  ContourUnit,
++  ContourAttr,
++  isContour,
+   PacketBlock,
+   Pie,
+   PieSection,
+@@ -103,6 +107,7 @@ export {
+   InfoGrammarGeneratedModule as InfoGeneratedModule,
+   MermaidGeneratedSharedModule,
+   PacketGrammarGeneratedModule as PacketGeneratedModule,
++  ContourGrammarGeneratedModule as ContourGeneratedModule,
+   PieGrammarGeneratedModule as PieGeneratedModule,
+   ArchitectureGrammarGeneratedModule as ArchitectureGeneratedModule,
+   GitGraphGrammarGeneratedModule as GitGraphGeneratedModule,
+@@ -122,6 +127,7 @@ export * from './gitGraph/index.js';
+ export * from './common/index.js';
+ export * from './info/index.js';
+ export * from './packet/index.js';
++export * from './contour/index.js';
+ export * from './pie/index.js';
+ export * from './treeView/index.js';
+ export * from './architecture/index.js';
+diff --git a/packages/parser/src/parse.ts b/packages/parser/src/parse.ts
+index f975d61..ca80d6c 100644
+--- a/packages/parser/src/parse.ts
++++ b/packages/parser/src/parse.ts
+@@ -3,6 +3,7 @@ import type { LangiumParser, ParseResult } from 'langium';
+ import type {
+   Info,
+   Packet,
++  Contour,
+   Pie,
+   Architecture,
+   GitGraph,
+@@ -21,6 +22,7 @@ import type {
+ export type DiagramAST =
+   | Info
+   | Packet
++  | Contour
+   | Pie
+   | Architecture
+   | GitGraph
+@@ -47,6 +49,11 @@ const initializers = {
+     const parser = createPacketServices().Packet.parser.LangiumParser;
+     parsers.packet = parser;
+   },
++  contour: async () => {
++    const { createContourServices } = await import('./language/contour/index.js');
++    const parser = createContourServices().Contour.parser.LangiumParser;
++    parsers.contour = parser;
++  },
+   pie: async () => {
+     const { createPieServices } = await import('./language/pie/index.js');
+     const parser = createPieServices().Pie.parser.LangiumParser;
+@@ -116,6 +123,7 @@ const initializers = {
+ 
+ export async function parse(diagramType: 'info', text: string): Promise<Info>;
+ export async function parse(diagramType: 'packet', text: string): Promise<Packet>;
++export async function parse(diagramType: 'contour', text: string): Promise<Contour>;
+ export async function parse(diagramType: 'pie', text: string): Promise<Pie>;
+ export async function parse(diagramType: 'treeView', text: string): Promise<TreeView>;
+ export async function parse(diagramType: 'architecture', text: string): Promise<Architecture>;
+-- 
+2.43.0
+

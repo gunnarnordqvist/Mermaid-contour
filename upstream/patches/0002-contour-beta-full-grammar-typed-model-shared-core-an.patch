@@ -1,0 +1,2890 @@
+From ed89d4540bd9f39e3b6db92cd4f16d556b19c4a6 Mon Sep 17 00:00:00 2001
+From: claude <noreply@anthropic.com>
+Date: Fri, 20 Nov 2026 22:42:18 +0000
+Subject: [PATCH 2/9] contour-beta: full grammar, typed model, shared core and
+ V1/V6 views
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01NaoqrqKZqBgeQ8jRW9CsY4
+---
+ .../mermaid/src/diagrams/contour/canvas.ts    | 285 ++++++
+ .../mermaid/src/diagrams/contour/common.ts    | 965 ++++++++++++++++++
+ .../src/diagrams/contour/contour.spec.ts      | 476 ++++++++-
+ packages/mermaid/src/diagrams/contour/db.ts   |  26 +-
+ .../mermaid/src/diagrams/contour/parser.ts    | 299 +++++-
+ .../src/diagrams/contour/renderer.spec.ts     | 200 ++++
+ .../mermaid/src/diagrams/contour/renderer.ts  | 130 +--
+ .../mermaid/src/diagrams/contour/styles.ts    |  13 +-
+ .../mermaid/src/diagrams/contour/types.ts     |  79 +-
+ .../src/diagrams/contour/views/decisions.ts   |   7 +
+ .../src/diagrams/contour/views/evidence.ts    |   7 +
+ .../src/diagrams/contour/views/landscape.ts   |  76 ++
+ .../src/diagrams/contour/views/supply.ts      |   7 +
+ .../src/diagrams/contour/views/year.ts        |   7 +
+ .../src/language/contour/contour.langium      |  57 +-
+ packages/parser/src/language/index.ts         |   9 +-
+ 16 files changed, 2454 insertions(+), 189 deletions(-)
+ create mode 100644 packages/mermaid/src/diagrams/contour/canvas.ts
+ create mode 100644 packages/mermaid/src/diagrams/contour/common.ts
+ create mode 100644 packages/mermaid/src/diagrams/contour/renderer.spec.ts
+ create mode 100644 packages/mermaid/src/diagrams/contour/views/decisions.ts
+ create mode 100644 packages/mermaid/src/diagrams/contour/views/evidence.ts
+ create mode 100644 packages/mermaid/src/diagrams/contour/views/landscape.ts
+ create mode 100644 packages/mermaid/src/diagrams/contour/views/supply.ts
+ create mode 100644 packages/mermaid/src/diagrams/contour/views/year.ts
+
+diff --git a/packages/mermaid/src/diagrams/contour/canvas.ts b/packages/mermaid/src/diagrams/contour/canvas.ts
+new file mode 100644
+index 0000000..e043742
+--- /dev/null
++++ b/packages/mermaid/src/diagrams/contour/canvas.ts
+@@ -0,0 +1,285 @@
++// cspell:ignore zorder capstyle
++import { FONT, FONT_SIZE, IN, PAL, PT, round } from './common.js';
++
++const NS = 'http://www.w3.org/2000/svg';
++
++/** Attribute values of an SVG element; null and undefined leave the attribute out. */
++export type SvgAttributes = Record<string, string | number | null | undefined>;
++
++export interface TextOptions {
++  size?: number;
++  colour?: string;
++  ha?: 'left' | 'center' | 'right';
++  va?: 'center' | 'top' | 'bottom';
++  weight?: 'normal' | 'bold';
++  rotation?: number;
++  zorder?: number;
++  style?: 'normal' | 'italic';
++}
++
++export interface LineOptions {
++  colour: string;
++  lw?: number;
++  dashes?: readonly number[] | null;
++  zorder?: number;
++  capstyle?: 'butt' | 'round' | 'square';
++}
++
++export interface RectOptions {
++  face?: string;
++  edge?: string;
++  lw?: number;
++  zorder?: number;
++  rounding?: number;
++  hatch?: string | null;
++  dashes?: readonly number[] | null;
++}
++
++export interface CircleOptions {
++  face: string;
++  edge: string;
++  lw?: number;
++  zorder?: number;
++}
++
++export interface DiamondOptions {
++  filled: boolean;
++  colour: string;
++  zorder?: number;
++}
++
++interface Item {
++  z: number;
++  i: number;
++  el: Element;
++}
++
++let patternCounter = 0;
++
++/**
++ * Primitives in inches, origin bottom left, y up, stacked by z-order like matplotlib. One inch is
++ * 100 SVG user units and one point is 100/72 units, so a diagram drawn here has the pixels of the
++ * figure that scripts/render_landscape.py draws.
++ */
++export class Canvas {
++  public readonly width: number;
++  public readonly height: number;
++  private readonly items: Item[] = [];
++  private readonly defs: Element[] = [];
++
++  public constructor(width: number, height: number) {
++    this.width = width;
++    this.height = height;
++  }
++
++  /** matplotlib's hatch '////': 12 diagonal lines per inch tile, anchored at the canvas's bottom left. */
++  public hatchPattern(colour: string): string {
++    const id = `contour-hatch-${++patternCounter}`;
++    const pattern = document.createElementNS(NS, 'pattern');
++    const patternAttributes: SvgAttributes = {
++      id,
++      patternUnits: 'userSpaceOnUse',
++      x: 0,
++      y: round((this.height * IN) % IN, 2),
++      width: IN,
++      height: IN,
++    };
++    this.setAttributes(pattern, patternAttributes);
++    for (let j = 0; j <= 24; j++) {
++      const c = (IN * j) / 12;
++      const line = document.createElementNS(NS, 'line');
++      this.setAttributes(line, {
++        x1: -IN,
++        y1: round(c + IN, 2),
++        x2: 2 * IN,
++        y2: round(c - 2 * IN, 2),
++        stroke: colour,
++        'stroke-width': round(0.8 * PT, 2),
++      });
++      pattern.appendChild(line);
++    }
++    this.defs.push(pattern);
++    return id;
++  }
++
++  /** Inches from the left to SVG user units. */
++  public X(x: number): number {
++    return round(x * IN, 2);
++  }
++
++  /** Inches from the bottom to SVG user units (y down). */
++  public Y(y: number): number {
++    return round((this.height - y) * IN, 2);
++  }
++
++  /** Adds an element at a z-order; elements of equal z-order keep their order of insertion. */
++  public push(z: number, tag: string, attrs: SvgAttributes, text?: string): Element {
++    const el = document.createElementNS(NS, tag);
++    this.setAttributes(el, attrs);
++    if (text !== undefined) {
++      el.textContent = text;
++    }
++    this.items.push({ z, i: this.items.length, el });
++    return el;
++  }
++
++  public text(
++    x: number,
++    y: number,
++    s: string,
++    {
++      size = FONT_SIZE,
++      colour = PAL.ink,
++      ha = 'left',
++      va = 'center',
++      weight = 'normal',
++      rotation = 0,
++      zorder = 8,
++      style = 'normal',
++    }: TextOptions = {}
++  ): void {
++    // matplotlib aligns text by a line box [baseline - A, baseline + D] with the font's typographic
++    // ascent and descent (Inter: A = 0.969 em, D = 0.241 em, measured against matplotlib 3.11);
++    // browsers use other baselines. Put the alphabetic baseline where matplotlib puts it, so that
++    // text lands on the same pixels.
++    const A = 0.96875;
++    const D = 0.2412;
++    const fs = size * PT;
++    const X = this.X(x);
++    const Y = this.Y(y);
++    const baseline = Y + { center: (A - D) / 2, top: A, bottom: -D }[va] * fs;
++    this.push(
++      zorder,
++      'text',
++      {
++        x: X,
++        y: round(baseline, 2),
++        'font-size': round(fs, 2),
++        fill: colour,
++        'font-family': FONT,
++        'text-anchor': { left: 'start', center: 'middle', right: 'end' }[ha],
++        'font-weight': weight === 'bold' ? 700 : null,
++        'font-style': style === 'italic' ? 'italic' : null,
++        transform: rotation ? `rotate(${-rotation} ${X} ${Y})` : null,
++      },
++      s
++    );
++  }
++
++  public line(
++    xs: readonly number[],
++    ys: readonly number[],
++    { colour, lw = 1, dashes = null, zorder = 3, capstyle = 'butt' }: LineOptions
++  ): void {
++    this.push(zorder, 'polyline', {
++      points: xs.map((x, k) => `${this.X(x)},${this.Y(ys[k])}`).join(' '),
++      fill: 'none',
++      stroke: colour,
++      'stroke-width': round(lw * PT, 2),
++      'stroke-linecap': capstyle,
++      'stroke-linejoin': 'round',
++      'stroke-dasharray': dashes ? dashes.map((d) => round(d * lw * PT, 2)).join(' ') : null,
++    });
++  }
++
++  public rect(
++    x: number,
++    y: number,
++    w: number,
++    h: number,
++    {
++      face = 'none',
++      edge = 'none',
++      lw = 1,
++      zorder = 1,
++      rounding = 0,
++      hatch = null,
++      dashes = null,
++    }: RectOptions = {}
++  ): void {
++    if (hatch) {
++      const id = this.hatchPattern(hatch);
++      this.rect(x, y, w, h, { face: `url(#${id})`, zorder: zorder + 0.001 });
++    }
++    this.push(zorder, 'rect', {
++      x: this.X(x),
++      y: this.Y(y + h),
++      width: round(w * IN, 2),
++      height: round(h * IN, 2),
++      fill: face,
++      stroke: edge,
++      'stroke-width': edge === 'none' ? null : round(lw * PT, 2),
++      rx: rounding ? round(rounding * IN, 2) : null,
++      'stroke-dasharray': dashes ? dashes.map((d) => round(d * lw * PT, 2)).join(' ') : null,
++    });
++  }
++
++  public circle(
++    x: number,
++    y: number,
++    r: number,
++    { face, edge, lw = 1, zorder = 4 }: CircleOptions
++  ): void {
++    this.push(zorder, 'circle', {
++      cx: this.X(x),
++      cy: this.Y(y),
++      r: round(r * IN, 2),
++      fill: face,
++      stroke: edge,
++      'stroke-width': lw ? round(lw * PT, 2) : null,
++    });
++  }
++
++  public roundedSquare(
++    x: number,
++    y: number,
++    half: number,
++    { face, edge, lw = 1, zorder = 4 }: CircleOptions
++  ): void {
++    this.rect(x - half, y - half, 2 * half, 2 * half, {
++      face,
++      edge,
++      lw,
++      zorder,
++      rounding: 0.3 * half,
++    });
++  }
++
++  public diamond(
++    x: number,
++    y: number,
++    half: number,
++    { filled, colour, zorder = 6 }: DiamondOptions
++  ): void {
++    const p = [
++      [x - half, y],
++      [x, y + half],
++      [x + half, y],
++      [x, y - half],
++    ];
++    this.push(zorder, 'polygon', {
++      points: p.map(([a, b]) => `${this.X(a)},${this.Y(b)}`).join(' '),
++      fill: filled ? colour : PAL.background,
++      stroke: colour,
++      'stroke-width': round(PT, 2),
++    });
++  }
++
++  /** Appends the definitions and the elements, in z-order, to an svg element. */
++  public flush(svg: Element): void {
++    if (this.defs.length) {
++      const defs = document.createElementNS(NS, 'defs');
++      this.defs.forEach((pattern) => defs.appendChild(pattern));
++      svg.appendChild(defs);
++    }
++    [...this.items].sort((a, b) => a.z - b.z || a.i - b.i).forEach(({ el }) => svg.appendChild(el));
++  }
++
++  private setAttributes(el: Element, attrs: SvgAttributes): void {
++    for (const [key, value] of Object.entries(attrs)) {
++      if (value !== null && value !== undefined) {
++        el.setAttribute(key, String(value));
++      }
++    }
++  }
++}
+diff --git a/packages/mermaid/src/diagrams/contour/common.ts b/packages/mermaid/src/diagrams/contour/common.ts
+new file mode 100644
+index 0000000..0df15ea
+--- /dev/null
++++ b/packages/mermaid/src/diagrams/contour/common.ts
+@@ -0,0 +1,965 @@
++// cspell:ignore zorder capstyle textwrap
++/**
++ * The core shared by the six views of Contour: scales, palette, geometry in inches and the marks.
++ *
++ * This is a port of scripts/render_landscape.py (through the standalone mermaid-contour.mjs). One
++ * inch is 100 SVG user units. Every constant and algorithm is kept as it is there, so that a
++ * diagram has the pixels of the figure in the book.
++ */
++import type { Canvas, CircleOptions } from './canvas.js';
++import type { ContourModel, ContourUnit, EvidenceKind, Reach, Reversibility } from './types.js';
++
++// ---------------------------------------------------------------------------
++// Scales and palette (docs/NOTATION.md, docs/chart_palette.json)
++// ---------------------------------------------------------------------------
++export const LEVEL_NAMES = [
++  'Level 0 Advisory',
++  'Level 1 Assisted',
++  'Level 2 Supervised',
++  'Level 3 Bounded',
++  'Level 4 Autonomous',
++] as const;
++export const REV_NAMES: Record<Reversibility, string> = {
++  R1: 'Reversible at once',
++  R2: 'Reversible with effort',
++  R3: 'Hard to reverse',
++  R4: 'Irreversible',
++};
++/** Bottom row to top row. */
++export const REV_ORDER: readonly Reversibility[] = ['R1', 'R2', 'R3', 'R4'];
++export const REACH_RATIO: Record<Reach, number> = { S: 1.0, M: 1.6, L: 2.4, XL: 3.4 };
++export const REACH_LABELS: Record<Reach, string> = {
++  S: 'S under 100',
++  M: 'M 100 to 999',
++  L: 'L 1,000 to 9,999',
++  XL: 'XL 10,000 and more',
++};
++export const PAL = {
++  background: '#F8FAFF',
++  ink: '#182033',
++  muted: '#4F5B71',
++  grid: '#DFE5EE',
++  people: '#6B7280',
++  emptyCorner: '#FBE9E7',
++  warning: '#C0392B',
++  ice: '#E0F2FE',
++  supplier: '#A3927F',
++  nonEu: '#8C6D4E',
++  automatic: '#182033',
++  attested: '#6B7280',
++  modes: [
++    ['Mode 0 Ambient AI', '#7890B0'],
++    ['Mode 1 Conversational assistants', '#3B82F6'],
++    ['Mode 2 Embedded workplace assistants', '#40A090'],
++    ['Mode 3 Agentic work tools', '#C88000'],
++    ['Mode 4 Built AI applications', '#1B3A7A'],
++    ['Mode 5 Autonomous production agents', '#B2367D'],
++  ] as readonly (readonly [string, string])[],
++  ramp: ['#DCE6F7', '#AEC3E8', '#7897D3', '#4466B4', '#1B3A7A'] as readonly string[],
++};
++export const FONT = "Inter, 'DejaVu Sans', Arial, sans-serif";
++
++export const SUPPLIER_ROLE_NAMES = {
++  model: 'Model provider',
++  hosting: 'Hosting',
++  application: 'Application',
++  operations: 'Operations',
++} as const;
++/** The columns of the evidence view (V5): evidence kind and heading. */
++export const EVIDENCE_COLUMNS: readonly (readonly [EvidenceKind | 'none', string])[] = [
++  ['logs', 'Logs'],
++  ['tests', 'Tests and evaluations'],
++  ['gates', 'Gates and policies as code'],
++  ['attestations', 'Attestations'],
++  ['none', 'None'],
++];
++export const AUTOMATIC_KINDS: readonly EvidenceKind[] = ['logs', 'tests', 'gates'];
++
++// ---------------------------------------------------------------------------
++// Geometry, in inches (scripts/render_landscape.py)
++// ---------------------------------------------------------------------------
++export const UNIT_RADIUS = 0.075;
++export const SQUARE_FACTOR = Math.sqrt(Math.PI) / 2;
++export const DIAMOND_HALF = 0.055;
++export const SEAT_RADIUS = 0.07;
++export const SEAT_GAP = 0.02;
++export const BASELINE_GAP = 0.045;
++export const LABEL_GAP = 0.02;
++export const LABEL_HEIGHT = 0.13;
++export const CHAR_WIDTH = 0.07;
++export const LINE_PITCH = 0.15;
++export const CELL_V1 = 1.46;
++export const CELL_V6 = 1.28;
++export const MARK_SCALE_V6 = CELL_V6 / CELL_V1;
++export const LEGEND_WIDTH = 2.0;
++export const LEGEND_WIDTH_V6 = 1.7;
++export const ROW_LABEL_WIDTH = 0.5;
++export const COL_LABEL_HEIGHT = 0.45;
++export const TITLE_BAND = 0.55;
++export const FOOTER_BAND = 0.46;
++export const FOOTER_LINE = 0.14;
++export const LEGEND_TOP = 0.3;
++export const LEGEND_BOTTOM = FOOTER_BAND + 0.04;
++export const MARGIN = 0.3;
++export const SIZE_BLOCK_HEIGHT = 0.66;
++export const FONT_SIZE = 9;
++export const TITLE_SIZE = 14;
++export const ITEM_GAP_X = 0.04;
++export const ITEM_GAP_Y = 0.04;
++export const IN = 100;
++export const PT = IN / 72;
++
++// Decisions (V4) and evidence (V5)
++export const MINI_RADIUS = 0.075;
++export const ROW_PITCH = 0.24;
++export const ACTION_PITCH = 0.145;
++export const ROW_PITCH_EVIDENCE = 0.3;
++export const LABEL_AREA = 3.2;
++/** The standard figure of views V2 to V5: 11 by 7.5 inches (V1 is the same, V6 is 16 by 8). */
++export const FIG_W = 11;
++export const FIG_H = 7.5;
++export const FIG = { W: FIG_W, H: FIG_H } as const;
++
++// Supply (V3)
++export const BOX_PAD = 0.1;
++export const BOX_TITLE_LINE = 0.15;
++export const BOX_GAP = 0.12;
++export const ITEM_GAP = 0.08;
++
++export const round = (v: number, d: number): number => {
++  const f = 10 ** d;
++  return Math.round(v * f) / f;
++};
++
++// ---------------------------------------------------------------------------
++// Unit helpers
++// ---------------------------------------------------------------------------
++export const radius = (u: Pick<ContourUnit, 'reach'>, scale = 1): number =>
++  UNIT_RADIUS * REACH_RATIO[u.reach] * scale;
++
++export const halfExtent = (u: Pick<ContourUnit, 'reach' | 'identity'>, scale = 1): number =>
++  u.identity === 'person' ? radius(u, scale) : radius(u, scale) * SQUARE_FACTOR;
++
++export const hollow = (u: Pick<ContourUnit, 'status'>): boolean =>
++  u.status === 'paused' || u.status === 'retired';
++
++/** A unit at Level 3 whose policy point is not enforced is outlined in the warning colour. */
++export const redRule = (u: Pick<ContourUnit, 'level' | 'policy'>): boolean =>
++  u.level === 3 && u.policy !== 'enforced';
++
++export const textWidth = (s: string, size = FONT_SIZE): number =>
++  s.length * CHAR_WIDTH * (size / FONT_SIZE);
++
++const compareStrings = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
++
++// WCAG contrast, to choose white or ink text on a fill
++const luminance = (colour: string): number => {
++  const channel = (v: number) => {
++    const x = v / 255;
++    return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
++  };
++  const [r, g, b] = [1, 3, 5].map((i) => parseInt(colour.slice(i, i + 2), 16));
++  return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
++};
++const contrast = (a: string, b: string): number => {
++  const [la, lb] = [luminance(a), luminance(b)];
++  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
++};
++export const textOn = (fill: string): string =>
++  contrast(fill, '#FFFFFF') >= contrast(fill, PAL.ink) ? '#FFFFFF' : PAL.ink;
++export const modeColour = (m: number): string => PAL.modes[m][1];
++
++/** Word wrap like Python's textwrap.wrap: break at spaces and after a hyphen between letters. */
++export function wrapToWidth(
++  s: string,
++  width: number,
++  size = FONT_SIZE,
++  maxLines: number | null = null
++): string[] {
++  const chars = Math.max(8, Math.floor(width / ((CHAR_WIDTH * size) / FONT_SIZE)));
++  const chunks: string[] = [];
++  for (const part of s.trim().split(/(\s+)/)) {
++    if (!part) {
++      continue;
++    }
++    if (/^\s+$/.test(part)) {
++      chunks.push(' ');
++    } else {
++      chunks.push(
++        ...part.replace(/([^\s\w]*\w+[^\W\d]-)(?=\w+[^\W\d])/g, '$1\u0001').split('\u0001')
++      );
++    }
++  }
++  const lines: string[] = [];
++  let cur: string[] = [];
++  let len = 0;
++  const flush = () => {
++    while (cur.length && cur[cur.length - 1] === ' ') {
++      cur.pop();
++    }
++    lines.push(cur.join(''));
++    cur = [];
++    len = 0;
++  };
++  while (chunks.length) {
++    const c = chunks[0];
++    if (c === ' ' && !cur.length) {
++      chunks.shift();
++      continue;
++    }
++    if (len + c.length <= chars) {
++      cur.push(chunks.shift()!);
++      len += c.length;
++      continue;
++    }
++    if (c.length > chars && !cur.length) {
++      cur.push(c.slice(0, chars));
++      chunks[0] = c.slice(chars);
++      flush();
++      continue;
++    }
++    flush();
++  }
++  if (cur.length) {
++    flush();
++  }
++  if (!lines.length) {
++    lines.push('');
++  }
++  if (maxLines && lines.length > maxLines) {
++    lines.length = maxLines;
++    lines[maxLines - 1] = lines[maxLines - 1].slice(0, Math.max(1, chars - 1)).trimEnd() + '…';
++  }
++  return lines;
++}
++
++export function truncateToWidth(s: string, width: number, size = FONT_SIZE): string {
++  const chars = Math.max(4, Math.floor(width / ((CHAR_WIDTH * size) / FONT_SIZE)));
++  return s.length <= chars ? s : s.slice(0, chars - 1).trimEnd() + '…';
++}
++
++// ---------------------------------------------------------------------------
++// Marks
++// ---------------------------------------------------------------------------
++/** Room a mark takes around its centre, in inches. */
++export interface Footprint {
++  left: number;
++  right: number;
++  up: number;
++  down: number;
++  width: number;
++}
++
++export interface FootprintOptions {
++  seat?: boolean;
++  label?: boolean;
++  isNew?: boolean;
++  scale?: number;
++}
++
++export const labelBeside = (u: Pick<ContourUnit, 'reach'>): boolean =>
++  u.reach === 'S' || u.reach === 'M';
++
++export function markFootprint(
++  u: ContourUnit,
++  { seat = true, label = true, isNew = false, scale = 1 }: FootprintOptions = {}
++): Footprint {
++  const e = halfExtent(u, scale);
++  let left = e + DIAMOND_HALF + 0.01;
++  let right = e + 0.02;
++  const up = e + (seat && u.tier !== 'T0' ? SEAT_GAP + 2 * SEAT_RADIUS : 0.03);
++  let down = e + BASELINE_GAP + 0.03;
++  if (label && labelBeside(u)) {
++    right = e + LABEL_GAP + 0.02 + textWidth(u.id) + 0.08 + (isNew ? textWidth('new') + 0.2 : 0);
++    down = Math.max(down, LABEL_HEIGHT / 2);
++  } else if (label) {
++    const half = textWidth(u.id) / 2 + 0.04;
++    left = Math.max(left, half);
++    right = Math.max(right, half);
++    down += LABEL_GAP + LABEL_HEIGHT + (isNew ? LABEL_HEIGHT : 0);
++  }
++  return { left, right, up, down, width: left + right };
++}
++
++export function ghostFootprint(u: ContourUnit, scale = 1): Footprint {
++  const e = halfExtent(u, scale) + 0.02;
++  return { left: e, right: e, up: e, down: e, width: 2 * e };
++}
++
++export const digitSize = (r: number): number => Math.max(FONT_SIZE, Math.min(12.0, 4.0 + r * 32.0));
++
++export function drawShape(
++  cv: Canvas,
++  x: number,
++  y: number,
++  u: Pick<ContourUnit, 'identity'>,
++  half: number,
++  o: CircleOptions
++): void {
++  if (u.identity === 'person') {
++    cv.circle(x, y, half, o);
++  } else {
++    cv.roundedSquare(x, y, half, o);
++  }
++}
++
++export interface DrawMarkOptions {
++  label?: boolean;
++  scale?: number;
++  hollowOverride?: boolean | null;
++  crossedOverride?: boolean | null;
++  isNew?: boolean;
++}
++
++export function drawMark(
++  cv: Canvas,
++  x: number,
++  y: number,
++  u: ContourUnit,
++  {
++    label = true,
++    scale = 1,
++    hollowOverride = null,
++    crossedOverride = null,
++    isNew = false,
++  }: DrawMarkOptions = {}
++): void {
++  const colour = modeColour(u.mode);
++  const hol = hollowOverride ?? hollow(u);
++  const e = halfExtent(u, scale);
++  drawShape(cv, x, y, u, e, {
++    face: hol ? PAL.background : colour,
++    edge: colour,
++    lw: 1.4,
++    zorder: 4,
++  });
++  if (redRule(u)) {
++    drawShape(cv, x, y, u, e + 0.03, { face: 'none', edge: PAL.warning, lw: 1.3, zorder: 3.5 });
++  }
++  cv.text(x, y, String(u.mode), {
++    size: digitSize(radius(u, scale)),
++    colour: hol ? colour : textOn(colour),
++    ha: 'center',
++    weight: 'bold',
++    zorder: 5,
++  });
++  if (crossedOverride ?? u.status === 'retired') {
++    const d = e * 0.75;
++    cv.line([x - d, x + d], [y - d, y + d], { colour: PAL.ink, lw: 1.3, zorder: 5.5 });
++    cv.line([x - d, x + d], [y + d, y - d], { colour: PAL.ink, lw: 1.3, zorder: 5.5 });
++  }
++  if (u.policy !== 'none') {
++    cv.diamond(x - e, y, DIAMOND_HALF, { filled: u.policy === 'enforced', colour: PAL.ink });
++  }
++  if (u.tier !== 'T0') {
++    const cy = y + e + SEAT_GAP + SEAT_RADIUS;
++    cv.circle(x, cy, SEAT_RADIUS, { face: PAL.people, edge: PAL.people, lw: 0, zorder: 4 });
++    cv.text(x, cy, u.tier[1], { colour: '#FFFFFF', ha: 'center', weight: 'bold', zorder: 5 });
++  }
++  const yBase = y - e - BASELINE_GAP;
++  if (u.evidence !== 'none') {
++    const half = Math.max(0.8 * e, 0.1);
++    if (u.evidence === 'automatic') {
++      cv.line([x - half, x + half], [yBase, yBase], { colour: PAL.automatic, lw: 1.8, zorder: 4 });
++    } else {
++      cv.line([x - half, x + half], [yBase, yBase], {
++        colour: PAL.attested,
++        lw: 1.8,
++        dashes: [3, 2],
++        zorder: 4,
++      });
++    }
++  }
++  // An invisible marker that lets a test read back where the mark was drawn.
++  cv.push(9, 'desc', { 'data-unit': u.id, 'data-x': round(x, 4), 'data-y': round(y, 4) });
++  let tickX: number;
++  let tickY: number;
++  if (label && labelBeside(u)) {
++    const lx = x + e + LABEL_GAP + 0.02;
++    cv.text(lx, y, u.id, { colour: PAL.muted });
++    [tickX, tickY] = [lx + textWidth(u.id) + 0.16, y];
++  } else if (label) {
++    cv.text(x, yBase - 0.02 - LABEL_GAP, u.id, { colour: PAL.muted, ha: 'center', va: 'top' });
++    [tickX, tickY] = [x - 0.14, yBase - 0.02 - LABEL_GAP - LABEL_HEIGHT - 0.06];
++  } else {
++    [tickX, tickY] = [x + e + 0.08, y];
++  }
++  if (isNew) {
++    // a small tick and the word "new" beside or under the label
++    cv.line([tickX - 0.05, tickX - 0.02, tickX + 0.04], [tickY, tickY - 0.04, tickY + 0.055], {
++      colour,
++      lw: 1.6,
++      zorder: 6,
++      capstyle: 'round',
++    });
++    cv.text(tickX + 0.08, tickY, 'new', { colour });
++  }
++}
++
++export function drawGhost(cv: Canvas, x: number, y: number, u: ContourUnit, scale = 1): void {
++  drawShape(cv, x, y, u, halfExtent(u, scale), {
++    face: 'none',
++    edge: modeColour(u.mode),
++    lw: 1.0,
++    zorder: 2.5,
++  });
++}
++
++export function drawMiniMark(
++  cv: Canvas,
++  x: number,
++  y: number,
++  u: ContourUnit,
++  r = MINI_RADIUS
++): void {
++  const colour = modeColour(u.mode);
++  const hol = hollow(u);
++  const half = u.identity === 'person' ? r : r * SQUARE_FACTOR;
++  drawShape(cv, x, y, u, half, {
++    face: hol ? PAL.background : colour,
++    edge: colour,
++    lw: 1.2,
++    zorder: 4,
++  });
++  cv.text(x, y, String(u.mode), {
++    colour: hol ? colour : textOn(colour),
++    ha: 'center',
++    weight: 'bold',
++    zorder: 5,
++  });
++  if (u.status === 'retired') {
++    const d = half * 0.75;
++    cv.line([x - d, x + d], [y - d, y + d], { colour: PAL.ink, lw: 1.1, zorder: 5.5 });
++    cv.line([x - d, x + d], [y + d, y - d], { colour: PAL.ink, lw: 1.1, zorder: 5.5 });
++  }
++}
++
++// ---------------------------------------------------------------------------
++// Layout of several marks in one cell
++// ---------------------------------------------------------------------------
++/** An item to place: a key, its footprint and whatever the view wants to carry along. */
++export interface LayoutItem {
++  key: string;
++  fp: Footprint;
++  u?: ContourUnit;
++}
++
++export type Positions = Record<string, [number, number]>;
++export type CellEdge = 'top' | 'bottom' | null;
++
++export function packRows<T extends { fp: Footprint }>(items: readonly T[], maxW: number): T[][] {
++  const rows: T[][] = [[]];
++  let used = 0;
++  for (const it of items) {
++    const w = it.fp.width;
++    if (rows[rows.length - 1].length && used + ITEM_GAP_X + w > maxW) {
++      rows.push([]);
++      used = 0;
++    }
++    if (rows[rows.length - 1].length) {
++      used += ITEM_GAP_X;
++    }
++    rows[rows.length - 1].push(it);
++    used += w;
++  }
++  return rows;
++}
++
++export const rowsExtent = <T extends { fp: Footprint }>(rows: readonly T[][]): [number, number] => [
++  Math.max(
++    ...rows.map((r) => r.reduce((s, it) => s + it.fp.width, 0) + ITEM_GAP_X * (r.length - 1))
++  ),
++  rows.reduce(
++    (s, r) => s + Math.max(...r.map((it) => it.fp.up)) + Math.max(...r.map((it) => it.fp.down)),
++    0
++  ) +
++    ITEM_GAP_Y * (rows.length - 1),
++];
++
++/**
++ * Positions the items of one grid cell, relative to the cell centre. The candidate packings are
++ * tried in a fixed order and the one with the least overflow wins, so the result is deterministic.
++ */
++export function layoutInCell<T extends { key: string; fp: Footprint }>(
++  items: readonly T[],
++  cellW: number,
++  cellH: number,
++  edge: CellEdge = null
++): Positions {
++  if (!items.length) {
++    return {};
++  }
++  const ordered = [...items].sort((a, b) => {
++    const ka = -(a.fp.width * (a.fp.up + a.fp.down));
++    const kb = -(b.fp.width * (b.fp.up + b.fp.down));
++    return ka - kb || compareStrings(a.key, b.key);
++  });
++  const pad = 0.05;
++  const candidates: T[][][] = [[[...ordered]]];
++  for (const f of [1.3, 1.2, 1.1, 1.0, 0.9, 0.8, 0.6, 0.45]) {
++    candidates.push(packRows(ordered, (cellW - 2 * pad) * f));
++  }
++  candidates.push(ordered.map((it) => [it]));
++  const overflow = (rows: T[][]): [number, number] => {
++    const [w, h] = rowsExtent(rows);
++    return [
++      round(3 * Math.max(w - (cellW - 2 * pad), 0) + Math.max(h - (cellH - 2 * pad), 0), 4),
++      rows.length,
++    ];
++  };
++  let best = candidates[0];
++  let bo = overflow(best);
++  for (const c of candidates.slice(1)) {
++    const o = overflow(c);
++    if (o[0] < bo[0] || (o[0] === bo[0] && o[1] < bo[1])) {
++      best = c;
++      bo = o;
++    }
++  }
++  const [, height] = rowsExtent(best);
++  const pos: Positions = {};
++  let cy = height / 2;
++  for (const row of best) {
++    const up = Math.max(...row.map((it) => it.fp.up));
++    const down = Math.max(...row.map((it) => it.fp.down));
++    const rowW = row.reduce((s, it) => s + it.fp.width, 0) + ITEM_GAP_X * (row.length - 1);
++    let cx = -rowW / 2;
++    for (const it of row) {
++      pos[it.key] = [round(cx + it.fp.left, 6), round(cy - up, 6)];
++      cx += it.fp.width + ITEM_GAP_X;
++    }
++    cy -= up + down + ITEM_GAP_Y;
++  }
++  if (edge === 'top' || edge === 'bottom') {
++    const excess = height / 2 - (cellH / 2 - pad);
++    if (excess > 0) {
++      const shift = edge === 'top' ? -excess : excess;
++      for (const k of Object.keys(pos)) {
++        pos[k] = [pos[k][0], round(pos[k][1] + shift, 6)];
++      }
++    }
++  }
++  return pos;
++}
++
++// ---------------------------------------------------------------------------
++// The grid
++// ---------------------------------------------------------------------------
++/** Origin (bottom left) and cell size of a grid of 5 columns and 4 rows, in inches. */
++export interface Grid {
++  x0: number;
++  y0: number;
++  cell: number;
++}
++
++export const gridCentre = (g: Grid, level: number, rev: Reversibility): [number, number] => [
++  g.x0 + (level + 0.5) * g.cell,
++  g.y0 + (REV_ORDER.indexOf(rev) + 0.5) * g.cell,
++];
++
++export function drawGrid(
++  cv: Canvas,
++  g: Grid,
++  { rowLabels = true }: { rowLabels?: boolean } = {}
++): void {
++  const { x0, y0, cell: c } = g;
++  cv.rect(x0 + 4 * c, y0 + 3 * c, c, c, { face: PAL.emptyCorner, zorder: 0.5 });
++  cv.text(x0 + 4.5 * c, y0 + 4 * c - 0.1, 'the empty corner', {
++    colour: PAL.warning,
++    ha: 'center',
++    va: 'top',
++    zorder: 1,
++    style: 'italic',
++  });
++  for (let i = 0; i < 6; i++) {
++    cv.line([x0 + i * c, x0 + i * c], [y0, y0 + 4 * c], {
++      colour: PAL.grid,
++      lw: i === 0 || i === 5 ? 0.8 : 0.6,
++      zorder: 1,
++    });
++  }
++  for (let j = 0; j < 5; j++) {
++    cv.line([x0, x0 + 5 * c], [y0 + j * c, y0 + j * c], {
++      colour: PAL.grid,
++      lw: j === 0 || j === 4 ? 0.8 : 0.6,
++      zorder: 1,
++    });
++  }
++  LEVEL_NAMES.forEach((name, i) => {
++    const [a, b, ...rest] = name.split(' ');
++    const cx = x0 + (i + 0.5) * c;
++    cv.text(cx, y0 - 0.09, `${a} ${b}`, {
++      size: FONT_SIZE + 0.5,
++      ha: 'center',
++      va: 'top',
++      weight: 'bold',
++    });
++    cv.text(cx, y0 - 0.25, rest.join(' '), { colour: PAL.muted, ha: 'center', va: 'top' });
++  });
++  if (rowLabels) {
++    REV_ORDER.forEach((tier, j) => {
++      const cy = y0 + (j + 0.5) * c;
++      cv.text(x0 - 0.3, cy, tier, {
++        size: FONT_SIZE + 0.5,
++        ha: 'center',
++        weight: 'bold',
++        rotation: 90,
++      });
++      cv.text(x0 - 0.14, cy, REV_NAMES[tier], { colour: PAL.muted, ha: 'center', rotation: 90 });
++    });
++  }
++}
++
++export function placeUnits(units: readonly ContourUnit[], g: Grid, scale: number): Positions {
++  const byCell = new Map<string, Required<LayoutItem>[]>();
++  for (const u of [...units].sort((a, b) => compareStrings(a.id, b.id))) {
++    const k = `${u.level},${u.reversibility}`;
++    if (!byCell.has(k)) {
++      byCell.set(k, []);
++    }
++    byCell.get(k)!.push({ key: u.id, fp: markFootprint(u, { scale }), u });
++  }
++  const out: Positions = {};
++  for (const items of byCell.values()) {
++    const { level, reversibility } = items[0].u;
++    const [cx, cy] = gridCentre(g, level, reversibility);
++    const edge: CellEdge =
++      reversibility === 'R4' ? 'top' : reversibility === 'R1' ? 'bottom' : null;
++    const p = layoutInCell(items, g.cell, g.cell, edge);
++    for (const k of Object.keys(p)) {
++      out[k] = [cx + p[k][0], cy + p[k][1]];
++    }
++  }
++  return out;
++}
++
++export function drawPanel(
++  cv: Canvas,
++  g: Grid,
++  units: readonly ContourUnit[],
++  { rowLabels = true, scale = 1 }: { rowLabels?: boolean; scale?: number } = {}
++): Positions {
++  drawGrid(cv, g, { rowLabels });
++  const pos = placeUnits(units, g, scale);
++  for (const u of units) {
++    const [x, y] = pos[u.id];
++    drawMark(cv, x, y, u, { scale });
++  }
++  return pos;
++}
++
++// ---------------------------------------------------------------------------
++// Legend and summary strip
++// ---------------------------------------------------------------------------
++export type Swatch = (cv: Canvas, x: number, y: number) => void;
++
++export interface LegendItem {
++  lines: string[];
++  header?: boolean;
++  height?: number;
++  swatch?: Swatch | null;
++}
++
++export interface LegendOptions {
++  /** Add the trail entries of the year view (V2). */
++  trail?: boolean;
++  /** Add the container entries of the supply view (V3). */
++  containers?: boolean;
++}
++
++export function legendItems(
++  width: number,
++  { trail = false, containers = false }: LegendOptions = {}
++): LegendItem[] {
++  const swW = 0.24;
++  const textW = width - swW;
++  const items: LegendItem[] = [];
++  const header = (t: string) => items.push({ lines: [t], header: true });
++  const line = (t: string, swatch: Swatch | null = null) =>
++    items.push({ lines: wrapToWidth(t, swatch ? textW : width), swatch });
++  const modeSw =
++    (m: number): Swatch =>
++    (cv, x, y) => {
++      const c = modeColour(m);
++      cv.circle(x + 0.075, y, 0.07, { face: c, edge: c, lw: 0 });
++      cv.text(x + 0.075, y, String(m), { colour: textOn(c), ha: 'center', weight: 'bold' });
++    };
++  header('Columns: autonomy level');
++  LEVEL_NAMES.forEach((n) => line(n));
++  header('Rows: reversibility');
++  [...REV_ORDER].reverse().forEach((t) => line(`${t} ${REV_NAMES[t]}`));
++  header('Size: reach (people a year)');
++  items.push({ lines: ['__sizes__'], height: SIZE_BLOCK_HEIGHT });
++  header('Colour: usage mode');
++  PAL.modes.forEach(([name], m) => line(name, modeSw(m)));
++  header('Shape: identity');
++  line("a person's identity", (cv, x, y) =>
++    cv.circle(x + 0.075, y, 0.07, { face: PAL.background, edge: PAL.ink, lw: 1.2 })
++  );
++  line('an identity of its own', (cv, x, y) =>
++    cv.roundedSquare(x + 0.075, y, 0.07 * SQUARE_FACTOR + 0.005, {
++      face: PAL.background,
++      edge: PAL.ink,
++      lw: 1.2,
++    })
++  );
++  header('Diamond: policy point');
++  line('enforced', (cv, x, y) =>
++    cv.diamond(x + 0.075, y, DIAMOND_HALF, { filled: true, colour: PAL.ink })
++  );
++  line('planned; absent: none', (cv, x, y) =>
++    cv.diamond(x + 0.075, y, DIAMOND_HALF, { filled: false, colour: PAL.ink })
++  );
++  header('Seat: decision tier');
++  line('T1 to T4; absent: T0', (cv, x, y) => {
++    cv.circle(x + 0.075, y, SEAT_RADIUS, { face: PAL.people, edge: PAL.people, lw: 0 });
++    cv.text(x + 0.075, y, '2', { colour: '#FFFFFF', ha: 'center', weight: 'bold' });
++  });
++  header('Baseline: evidence');
++  line('automatic', (cv, x, y) =>
++    cv.line([x, x + 0.18], [y, y], { colour: PAL.automatic, lw: 1.8 })
++  );
++  line('attested; absent: none', (cv, x, y) =>
++    cv.line([x, x + 0.18], [y, y], { colour: PAL.attested, lw: 1.8, dashes: [3, 2] })
++  );
++  if (containers) {
++    const box =
++      (colour: string, dashes: readonly number[] | null): Swatch =>
++      (cv, x, y) =>
++        cv.rect(x, y - 0.06, 0.2, 0.12, {
++          face: 'none',
++          edge: colour,
++          lw: 1.0,
++          dashes,
++          rounding: 0.03,
++        });
++    header('Containers');
++    line('own boundary', box(PAL.ink, null));
++    line('supplier, by role', box(PAL.supplier, [4, 2]));
++    line('non-EU jurisdiction', box(PAL.nonEu, [1.2, 1.6]));
++    line('model from a supplier', (cv, x, y) => {
++      cv.rect(x, y - 0.055, 0.2, 0.11, {
++        face: PAL.background,
++        edge: PAL.supplier,
++        lw: 0.8,
++        rounding: 0.03,
++      });
++      cv.line([x - 0.04, x], [y, y], { colour: PAL.supplier, lw: 0.8 });
++    });
++  }
++  if (trail) {
++    const c4 = modeColour(4);
++    header('Trail');
++    line('earlier, trail, later', (cv, x, y) => {
++      cv.circle(x + 0.04, y, 0.04, { face: 'none', edge: c4, lw: 1.0 });
++      cv.line([x + 0.08, x + 0.15], [y, y], { colour: c4, lw: 1.0 });
++      cv.circle(x + 0.19, y, 0.045, { face: c4, edge: c4, lw: 1.0 });
++    });
++    line('new in the period', (cv, x, y) =>
++      cv.line([x + 0.03, x + 0.07, x + 0.16], [y, y - 0.045, y + 0.06], {
++        colour: c4,
++        lw: 1.6,
++        capstyle: 'round',
++      })
++    );
++    line('retired', (cv, x, y) => {
++      cv.circle(x + 0.075, y, 0.065, { face: PAL.background, edge: c4, lw: 1.2 });
++      const d = 0.045;
++      cv.line([x + 0.075 - d, x + 0.075 + d], [y - d, y + d], { colour: PAL.ink, lw: 1.1 });
++      cv.line([x + 0.075 - d, x + 0.075 + d], [y + d, y - d], { colour: PAL.ink, lw: 1.1 });
++    });
++  }
++  return items;
++}
++
++export function drawLegend(
++  cv: Canvas,
++  x: number,
++  top: number,
++  bottom: number,
++  width: number,
++  scale = 1,
++  opts: LegendOptions = {}
++): void {
++  const items = legendItems(width, opts);
++  const sectionGap = 0.05;
++  const total = (pitch: number) =>
++    items.reduce(
++      (s, it) => s + (it.header ? sectionGap : 0) + (it.height ?? pitch * it.lines.length),
++      0
++    );
++  let pitch = LINE_PITCH;
++  while (total(pitch) > top - bottom && pitch > 0.135) {
++    pitch -= 0.005;
++  }
++  if (total(pitch) > top - bottom) {
++    throw new Error(
++      `Contour: the legend needs ${total(pitch).toFixed(2)} in, ${(top - bottom).toFixed(2)} in available`
++    );
++  }
++  cv.line([x - 0.12, x - 0.12], [bottom, top], { colour: PAL.grid, lw: 0.8 });
++  let y = top;
++  for (const it of items) {
++    if (it.header) {
++      y -= sectionGap;
++      cv.text(x, y - pitch / 2, it.lines[0], { weight: 'bold' });
++      y -= pitch;
++      continue;
++    }
++    if (it.lines[0] === '__sizes__') {
++      const blockH = it.height ?? SIZE_BLOCK_HEIGHT;
++      const rXL = UNIT_RADIUS * REACH_RATIO.XL * scale;
++      const cx = x + rXL + 0.02;
++      const bottomY = y - blockH + 0.04;
++      const labelX = cx + rXL + 0.22;
++      const sizes: Reach[] = ['S', 'M', 'L', 'XL'];
++      sizes.forEach((reach, k) => {
++        const r = UNIT_RADIUS * REACH_RATIO[reach] * scale;
++        const ly = bottomY + 0.05 + k * 0.155;
++        cv.circle(cx, bottomY + r, r, { face: 'none', edge: PAL.ink, lw: 1 });
++        const topY = bottomY + 2 * r;
++        cv.line([cx, cx + rXL + 0.08, labelX - 0.04], [topY, topY, ly], {
++          colour: PAL.grid,
++          lw: 0.7,
++          zorder: 2,
++        });
++        cv.text(labelX, ly, REACH_LABELS[reach]);
++      });
++      y -= blockH;
++      continue;
++    }
++    if (it.swatch) {
++      it.swatch(cv, x, y - pitch / 2);
++    }
++    const tx = it.swatch ? x + 0.24 : x;
++    it.lines.forEach((t, k) => cv.text(tx, y - pitch / 2 - k * pitch, t));
++    y -= pitch * it.lines.length;
++  }
++}
++
++export function drawSummary(
++  cv: Canvas,
++  x: number,
++  top: number,
++  units: readonly ContourUnit[]
++): void {
++  const per = (f: (u: ContourUnit) => number, n: number) =>
++    Array.from({ length: n }, (_, i) => units.filter((u) => f(u) === i).length);
++  const perMode = per((u) => u.mode, 6);
++  const perLevel = per((u) => u.level, 5);
++  cv.text(x, top - 0.08, `Units drawn: ${units.length}`, { weight: 'bold' });
++  const step = 0.42;
++  const start = x + 0.95;
++  const yMode = top - 0.34;
++  const yLevel = top - 0.6;
++  cv.text(x, yMode, 'Per mode', { colour: PAL.muted });
++  for (let m = 0; m < 6; m++) {
++    const cx = start + m * step;
++    const c = modeColour(m);
++    cv.circle(cx, yMode, 0.07, { face: c, edge: c, lw: 0 });
++    cv.text(cx, yMode, String(m), { colour: textOn(c), ha: 'center', weight: 'bold' });
++    cv.text(cx + 0.11, yMode, String(perMode[m]));
++  }
++  cv.text(x, yLevel, 'Per level', { colour: PAL.muted });
++  for (let l = 0; l < 5; l++) {
++    const cx = start + l * step;
++    const c = PAL.ramp[l];
++    cv.rect(cx - 0.07, yLevel - 0.065, 0.14, 0.13, { face: c, edge: PAL.ink, lw: 0.5 });
++    cv.text(cx, yLevel, String(l), { colour: textOn(c), ha: 'center', weight: 'bold' });
++    cv.text(cx + 0.11, yLevel, String(perLevel[l]));
++  }
++  const n = (f: (u: ContourUnit) => boolean) => units.filter(f).length;
++  cv.text(
++    x,
++    top - 0.84,
++    `Filled diamond ${n((u) => u.policy === 'enforced')} · Seat ${n((u) => u.tier !== 'T0')} · Solid baseline ${n((u) => u.evidence === 'automatic')} of ${units.length}`
++  );
++}
++
++export function drawTitleFooter(cv: Canvas, model: ContourModel): void {
++  if (model.title) {
++    cv.text(MARGIN, cv.height - 0.22, model.title, { size: TITLE_SIZE, weight: 'bold' });
++  }
++  if (model.subtitle) {
++    cv.text(MARGIN, cv.height - 0.47, model.subtitle, { colour: PAL.muted });
++  }
++  [...model.footer].reverse().forEach((t, k) => {
++    cv.text(MARGIN, 0.09 + k * FOOTER_LINE, t, { colour: PAL.muted });
++  });
++}
++
++// ---------------------------------------------------------------------------
++// Helpers of the decisions (V4) and evidence (V5) views
++// ---------------------------------------------------------------------------
++/** Units by descending level, then by id. */
++export const rowOrder = (units: readonly ContourUnit[]): ContourUnit[] =>
++  [...units].sort((a, b) => b.level - a.level || compareStrings(a.id, b.id));
++
++export function rowLabel(cv: Canvas, y: number, u: ContourUnit, nameRight: number): void {
++  drawMiniMark(cv, MARGIN + 0.1, y, u);
++  cv.text(MARGIN + 0.28, y, u.id, { weight: 'bold' });
++  cv.text(MARGIN + 1.02, y, `${u.reversibility} ${u.reach}`, { colour: PAL.muted });
++  const nameX = MARGIN + 1.5;
++  cv.text(nameX, y, truncateToWidth(u.name, nameRight - nameX), { colour: PAL.muted });
++}
++
++export function drawLevelBar(
++  cv: Canvas,
++  gridLeft: number,
++  cw: number,
++  y: number,
++  level: number,
++  thickness: number,
++  outline: string | null,
++  lw: number
++): void {
++  for (let k = 0; k <= level; k++) {
++    cv.rect(gridLeft + k * cw, y - thickness / 2, cw, thickness, { face: PAL.ramp[k], zorder: 2 });
++  }
++  if (outline) {
++    cv.rect(gridLeft, y - thickness / 2, (level + 1) * cw, thickness, {
++      face: 'none',
++      edge: outline,
++      lw,
++      zorder: 2.5,
++    });
++  }
++}
++
++/** Break items into rows no wider than maxW (used by the supply view's boxes). */
++export function flow<T>(
++  items: readonly T[],
++  maxW: number,
++  widthOf: (item: T) => number,
++  gap: number
++): T[][] {
++  const rows: T[][] = [[]];
++  let used = 0;
++  for (const it of items) {
++    const w = widthOf(it);
++    if (rows[rows.length - 1].length && used + gap + w > maxW) {
++      rows.push([]);
++      used = 0;
++    }
++    if (rows[rows.length - 1].length) {
++      used += gap;
++    }
++    rows[rows.length - 1].push(it);
++    used += w;
++  }
++  return rows;
++}
++
++/** Fills the canvas with the background colour; every view starts with this. */
++export function drawBackground(cv: Canvas): void {
++  cv.push(-1, 'rect', {
++    x: 0,
++    y: 0,
++    width: cv.width * IN,
++    height: cv.height * IN,
++    fill: PAL.background,
++  });
++}
++
++/** The comparison used for ids throughout, matching the JS and Python string order. */
++export { compareStrings };
+diff --git a/packages/mermaid/src/diagrams/contour/contour.spec.ts b/packages/mermaid/src/diagrams/contour/contour.spec.ts
+index f3c6279..e7d5113 100644
+--- a/packages/mermaid/src/diagrams/contour/contour.spec.ts
++++ b/packages/mermaid/src/diagrams/contour/contour.spec.ts
+@@ -1,6 +1,22 @@
+-import { describe, expect, it } from 'vitest';
+-import { parser } from './parser.js';
++// cspell:ignore textwrap
++import { beforeEach, describe, expect, it } from 'vitest';
++import { Canvas } from './canvas.js';
++import {
++  CELL_V1,
++  ITEM_GAP_X,
++  gridCentre,
++  layoutInCell,
++  markFootprint,
++  packRows,
++  placeUnits,
++  textOn,
++  truncateToWidth,
++  wrapToWidth,
++} from './common.js';
+ import { ContourDB } from './db.js';
++import { contour } from './detector.js';
++import { parser } from './parser.js';
++import type { ContourUnit } from './types.js';
+ 
+ const parse = async (input: string) => {
+   const db = new ContourDB();
+@@ -9,32 +25,456 @@ const parse = async (input: string) => {
+   return db;
+ };
+ 
+-describe('contour', () => {
+-  it('parses a title and units', async () => {
++const U = 'level=0 rev=R1 reach=S mode=0';
++
++const unit = (overrides: Partial<ContourUnit> = {}): ContourUnit => ({
++  id: 'A',
++  name: 'a',
++  level: 0,
++  reversibility: 'R1',
++  reach: 'S',
++  mode: 0,
++  identity: 'person',
++  policy: 'none',
++  tier: 'T0',
++  evidence: 'none',
++  status: 'active',
++  kinds: [],
++  hosting: 'unknown',
++  operatedBy: 'self',
++  suppliers: [],
++  actions: [],
++  ...overrides,
++});
++
++describe('contour parser', () => {
++  beforeEach(() => {
++    new ContourDB().clear();
++  });
++
++  it('is detected only with the -beta suffix', () => {
++    expect(contour.detector('contour-beta\n')).toBe(true);
++    expect(contour.detector('contour\n')).toBe(false);
++  });
++
++  it('parses a title and units with every attribute', async () => {
+     const db = await parse(`contour-beta
+       title Mini landscape
+-      unit NR-BT "Benefits triage" level=0 rev=R3 reach=XL mode=4 identity=own policy=enforced tier=T2 evidence=automatic
++      unit NR-BT "Benefits triage" level=0 rev=R3 reach=XL mode=4 identity=own policy=enforced tier=T2 evidence=automatic status=pilot kinds=logs,tests hosting=eu-supplier operated_by=supplier suppliers=S1,S2
+       unit NR-SA "Staff assistant" level=1 rev=R1 reach=L mode=0
+     `);
+-    expect(db.getDiagramTitle()).toBe('Mini landscape');
+-    const [a, b] = db.getUnits();
+-    expect(a).toMatchObject({ id: 'NR-BT', level: 0, reversibility: 3, reach: 'XL', mode: 4, identity: 'own', policy: 'enforced', tier: 'T2', evidence: 'automatic' });
++    const model = db.getModel();
++    expect(model.title).toBe('Mini landscape');
++    expect(model.view).toBe('landscape');
++    expect(model.panels).toHaveLength(1);
++    const [a, b] = model.panels[0].units;
++    expect(a).toMatchObject({
++      id: 'NR-BT',
++      name: 'Benefits triage',
++      level: 0,
++      reversibility: 'R3',
++      reach: 'XL',
++      mode: 4,
++      identity: 'own',
++      policy: 'enforced',
++      tier: 'T2',
++      evidence: 'automatic',
++      status: 'pilot',
++      kinds: ['logs', 'tests'],
++      hosting: 'eu-supplier',
++      operatedBy: 'supplier',
++      suppliers: ['S1', 'S2'],
++      actions: [],
++    });
+     // absences stay absences
+-    expect(b).toMatchObject({ identity: 'person', policy: 'none', tier: 'T0', evidence: 'none' });
++    expect(b).toMatchObject({
++      identity: 'person',
++      policy: 'none',
++      tier: 'T0',
++      evidence: 'none',
++      status: 'active',
++      kinds: [],
++      hosting: 'unknown',
++      operatedBy: 'self',
++      suppliers: [],
++    });
++  });
++
++  it('reads accessibility title and description', async () => {
++    const db = await parse(`contour-beta
++      accTitle: Landscape
++      accDescr: A landscape of two units
++      unit A "a" ${U}
++    `);
++    expect(db.getAccTitle()).toBe('Landscape');
++    expect(db.getAccDescription()).toBe('A landscape of two units');
++  });
++
++  it('reads view, subtitle, footer lines, panels, actions and suppliers', async () => {
++    const db = await parse(`contour-beta
++      view decisions
++      title T
++      subtitle "A subtitle: with a colon"
++      footer "first line"
++      footer "second line"
++      panel "Nordvik Region"
++        unit A "Rank the queue" ${U}
++          action "rank the queue" 0
++          action "send the letter" 3
++        unit B "b" ${U}
++      supplier S1 "Cloud Co" "Frankfurt" role=hosting jurisdiction=EU
++      supplier S2 "Models Inc" role=model jurisdiction=non-EU
++    `);
++    const model = db.getModel();
++    expect(model.view).toBe('decisions');
++    expect(model.subtitle).toBe('A subtitle: with a colon');
++    expect(model.footer).toEqual(['first line', 'second line']);
++    expect(model.panels.map((p) => p.name)).toEqual(['Nordvik Region']);
++    expect(model.panels[0].units[0].actions).toEqual([
++      ['rank the queue', 0],
++      ['send the letter', 3],
++    ]);
++    expect(model.panels[0].units[1].actions).toEqual([]);
++    expect(model.suppliers).toEqual([
++      { id: 'S1', label: 'Cloud Co', location: 'Frankfurt', role: 'hosting', jurisdiction: 'EU' },
++      { id: 'S2', label: 'Models Inc', location: null, role: 'model', jurisdiction: 'non-EU' },
++    ]);
++  });
++
++  it('chooses compare for two panels and landscape for none or one', async () => {
++    const two = await parse(`contour-beta
++      panel "One"
++        unit A "a" ${U}
++      panel "Two"
++        unit B "b" ${U}
++    `);
++    expect(two.getModel().view).toBe('compare');
++    const none = await parse('contour-beta\n');
++    expect(none.getModel().view).toBe('landscape');
++    expect(none.getModel().panels).toEqual([]);
++  });
++
++  it('allows the same unit in both panels of the year view only', async () => {
++    const year = await parse(`contour-beta
++      view year
++      panel "Start"
++        unit A "a" ${U}
++      panel "End"
++        unit A "a" level=1 rev=R2 reach=S mode=0
++    `);
++    expect(year.getModel().panels.map((p) => p.units.length)).toEqual([1, 1]);
++    await expect(
++      parse(`contour-beta
++      panel "Start"
++        unit A "a" ${U}
++      panel "End"
++        unit A "a" ${U}
++    `)
++    ).rejects.toThrow(/unit A is declared twice/);
++  });
++
++  it('rejects a missing required attribute, naming the unit', async () => {
++    await expect(parse(`contour-beta\n unit A "a" level=0 rev=R1 reach=S`)).rejects.toThrow(
++      /unit A lacks the required attribute mode/
++    );
++  });
++
++  it('rejects values outside the scales', async () => {
++    await expect(parse(`contour-beta\n unit A "a" level=5 rev=R1 reach=S mode=0`)).rejects.toThrow(
++      /unit A: level=5 must be an integer from 0 to 4/
++    );
++    await expect(parse(`contour-beta\n unit A "a" level=0 rev=R9 reach=S mode=0`)).rejects.toThrow(
++      /unit A: rev=R9 is not one of R1, R2, R3, R4/
++    );
++    await expect(
++      parse(`contour-beta\n unit A "a" level=0 rev=R1 reach=XXL mode=0`)
++    ).rejects.toThrow(/unit A: reach=XXL/);
++    await expect(parse(`contour-beta\n unit A "a" level=0 rev=R1 reach=S mode=6`)).rejects.toThrow(
++      /unit A: mode=6 must be an integer from 0 to 5/
++    );
++    await expect(parse(`contour-beta\n unit A "a" ${U} tier=T5`)).rejects.toThrow(
++      /unit A: tier=T5/
++    );
++    await expect(parse(`contour-beta\n unit A "a" ${U} policy=maybe`)).rejects.toThrow(
++      /unit A: policy=maybe/
++    );
++    await expect(parse(`contour-beta\n unit A "a" ${U} evidence=x`)).rejects.toThrow(
++      /unit A: evidence=x/
++    );
++    await expect(parse(`contour-beta\n unit A "a" ${U} status=lost`)).rejects.toThrow(
++      /unit A: status=lost/
++    );
++    await expect(parse(`contour-beta\n unit A "a" ${U} hosting=moon`)).rejects.toThrow(
++      /unit A: hosting=moon/
++    );
++    await expect(parse(`contour-beta\n unit A "a" ${U} kinds=logs,minutes`)).rejects.toThrow(
++      /unit A: kinds has "minutes"/
++    );
++    await expect(parse(`contour-beta\n view mosaic`)).rejects.toThrow(/view must be one of/);
++  });
++
++  it('rejects a duplicate id, a repeated attribute and an unknown attribute', async () => {
++    await expect(parse(`contour-beta\n unit A "a" ${U}\n unit A "b" ${U}`)).rejects.toThrow(
++      /unit A is declared twice/
++    );
++    await expect(parse(`contour-beta\n unit A "a" ${U} colour=red`)).rejects.toThrow(
++      /unit A: unknown attribute colour/
++    );
++    await expect(parse(`contour-beta\n unit A "a" ${U} mode=1`)).rejects.toThrow(
++      /unit A: mode is given twice/
++    );
++    await expect(
++      parse(`contour-beta
++      supplier S "s" role=model jurisdiction=EU
++      supplier S "t" role=model jurisdiction=EU`)
++    ).rejects.toThrow(/supplier S is declared twice/);
++    await expect(parse(`contour-beta\n supplier S "s" role=model`)).rejects.toThrow(
++      /supplier S lacks the required attribute jurisdiction/
++    );
++    await expect(parse(`contour-beta\n supplier S "s" role=pilot jurisdiction=EU`)).rejects.toThrow(
++      /supplier S: role=pilot/
++    );
++  });
++
++  it('rejects an action outside a unit and an action level above 4', async () => {
++    await expect(parse(`contour-beta\n action "x" 1`)).rejects.toThrow(/belongs under a unit/);
++    await expect(parse(`contour-beta\n panel "P"\n action "x" 1`)).rejects.toThrow(
++      /belongs under a unit/
++    );
++    await expect(parse(`contour-beta\n unit A "a" ${U}\n action "x" 5`)).rejects.toThrow(
++      /unit A: action "x" has level 5/
++    );
++  });
++
++  it('checks the number of panels against the view', async () => {
++    await expect(
++      parse(`contour-beta\n view compare\n panel "One"\n unit A "a" ${U}`)
++    ).rejects.toThrow(/view compare needs two panels/);
++    await expect(parse(`contour-beta\n view year\n panel "One"\n unit A "a" ${U}`)).rejects.toThrow(
++      /view year needs two panels/
++    );
++    await expect(
++      parse(
++        `contour-beta\n view evidence\n panel "One"\n unit A "a" ${U}\n panel "Two"\n unit B "b" ${U}`
++      )
++    ).rejects.toThrow(/view evidence takes one panel/);
++    await expect(parse(`contour-beta\n panel "1"\n panel "2"\n panel "3"`)).rejects.toThrow(
++      /at most two panels/
++    );
++  });
++
++  it('rejects units declared before the first panel when panels follow', async () => {
++    await expect(
++      parse(`contour-beta\n unit A "a" ${U}\n panel "P"\n unit B "b" ${U}`)
++    ).rejects.toThrow(/unit A is declared before the first panel/);
++  });
++
++  it('takes a number as an id', async () => {
++    const db = await parse(`contour-beta\n unit 7 "seven" ${U}`);
++    expect(db.getModel().panels[0].units[0].id).toBe('7');
++  });
++
++  it('ignores comments', async () => {
++    const db = await parse(`contour-beta
++      %% a comment
++      unit A "a" ${U} %% trailing
++    `);
++    expect(db.getModel().panels[0].units).toHaveLength(1);
++  });
++});
++
++describe('contour common', () => {
++  describe('wrapToWidth', () => {
++    // The expectations are the output of Python's textwrap.wrap(s, chars), which the renderer ports.
++    const width = (chars: number) => chars * 0.07 + 0.005;
++
++    it('breaks at spaces', () => {
++      expect(wrapToWidth('the quick brown fox jumps', width(10))).toEqual([
++        'the quick',
++        'brown fox',
++        'jumps',
++      ]);
++    });
++
++    it('breaks after a hyphen between letters', () => {
++      expect(wrapToWidth('Mode 2 Embedded-workplace assistants', width(16))).toEqual([
++        'Mode 2 Embedded-',
++        'workplace',
++        'assistants',
++      ]);
++      expect(wrapToWidth('re-run well-known state-of-the-art thing', width(12))).toEqual([
++        're-run well-',
++        'known state-',
++        'of-the-art',
++        'thing',
++      ]);
++    });
++
++    it('does not break after a hyphen next to a digit', () => {
++      expect(wrapToWidth('T1-2 and more words here', width(10))).toEqual([
++        'T1-2 and',
++        'more words',
++        'here',
++      ]);
++    });
++
++    it('cuts a word longer than the line', () => {
++      expect(wrapToWidth('abcdefghijklmnopqrstuvwxyz', width(10))).toEqual([
++        'abcdefghij',
++        'klmnopqrst',
++        'uvwxyz',
++      ]);
++      expect(wrapToWidth('Reversible with-effort', width(8))).toEqual([
++        'Reversib',
++        'le with-',
++        'effort',
++      ]);
++    });
++
++    it('never uses less than 8 characters', () => {
++      expect(wrapToWidth('aaaa bbbb cccc', 0.1)).toEqual(['aaaa', 'bbbb', 'cccc']);
++      expect(wrapToWidth('aaaa bbbb cccc dd', width(9))).toEqual(['aaaa bbbb', 'cccc dd']);
++    });
++
++    it('honours maxLines with an ellipsis', () => {
++      expect(wrapToWidth('one two three four five six', width(10), 9, 2)).toEqual([
++        'one two',
++        'three fou…',
++      ]);
++    });
++
++    it('returns one empty line for an empty string', () => {
++      expect(wrapToWidth('   ', 1)).toEqual(['']);
++    });
++  });
++
++  it('truncates with an ellipsis', () => {
++    expect(truncateToWidth('Benefits triage', 0.75)).toBe('Benefits…');
++    expect(truncateToWidth('short', 3)).toBe('short');
++  });
++
++  it('chooses white or ink text by contrast', () => {
++    expect(textOn('#1B3A7A')).toBe('#FFFFFF');
++    expect(textOn('#DCE6F7')).toBe('#182033');
++  });
++
++  describe('markFootprint', () => {
++    it('is the footprint of a small mark with a label beside it', () => {
++      const fp = markFootprint(unit({ id: 'AB' }));
++      expect(fp.left).toBeCloseTo(0.075 + 0.055 + 0.01, 10);
++      expect(fp.right).toBeCloseTo(0.075 + 0.02 + 0.02 + 0.14 + 0.08, 10);
++      expect(fp.up).toBeCloseTo(0.075 + 0.03, 10);
++      expect(fp.down).toBeCloseTo(0.075 + 0.045 + 0.03, 10);
++      expect(fp.width).toBeCloseTo(fp.left + fp.right, 10);
++    });
++
++    it('puts the label of a large mark below it and adds a seat above', () => {
++      const fp = markFootprint(unit({ id: 'XY', reach: 'XL', tier: 'T2' }));
++      const e = 0.075 * 3.4;
++      expect(fp.up).toBeCloseTo(e + 0.02 + 0.14, 10);
++      expect(fp.down).toBeCloseTo(e + 0.045 + 0.03 + 0.02 + 0.13, 10);
++      expect(fp.left).toBeCloseTo(e + 0.055 + 0.01, 10);
++      expect(fp.right).toBeCloseTo(e + 0.02, 10);
++    });
++
++    it('is smaller for a rounded square of the same reach and grows for a new unit', () => {
++      const circle = markFootprint(unit({ reach: 'L' }));
++      const square = markFootprint(unit({ reach: 'L', identity: 'own' }));
++      expect(square.up).toBeLessThan(circle.up);
++      const fresh = markFootprint(unit(), { isNew: true });
++      expect(fresh.right).toBeGreaterThan(markFootprint(unit()).right);
++    });
++  });
++
++  describe('layoutInCell', () => {
++    const items = ['E', 'D', 'C', 'B', 'A'].map((id) => ({
++      key: id,
++      fp: markFootprint(unit({ id, reach: 'M' })),
++    }));
++
++    it('is deterministic and independent of the input order', () => {
++      const a = layoutInCell(items, CELL_V1, CELL_V1);
++      const b = layoutInCell([...items].reverse(), CELL_V1, CELL_V1);
++      expect(a).toEqual(b);
++      expect(Object.keys(a).sort()).toEqual(['A', 'B', 'C', 'D', 'E']);
++    });
++
++    it('puts a single item at the centre of the cell', () => {
++      const [only] = items;
++      const p = layoutInCell([only], CELL_V1, CELL_V1);
++      expect(p.E[0]).toBeCloseTo(only.fp.left - only.fp.width / 2, 5);
++    });
++
++    it('returns nothing for no items', () => {
++      expect(layoutInCell([], 1, 1)).toEqual({});
++    });
++
++    it('shifts a crowded top-row cell down and a bottom-row cell up to stay inside', () => {
++      const crowd = Array.from({ length: 12 }, (_, i) => ({
++        key: `U${String(i).padStart(2, '0')}`,
++        fp: markFootprint(unit({ id: `U${i}`, reach: 'XL' })),
++      }));
++      const free = layoutInCell(crowd, CELL_V1, CELL_V1);
++      const top = layoutInCell(crowd, CELL_V1, CELL_V1, 'top');
++      const bottom = layoutInCell(crowd, CELL_V1, CELL_V1, 'bottom');
++      expect(top.U00[1]).toBeLessThan(free.U00[1]);
++      expect(bottom.U00[1]).toBeGreaterThan(free.U00[1]);
++    });
++  });
++
++  it('packs rows by width with a gap between items', () => {
++    const fp = { left: 0.1, right: 0.1, up: 0.1, down: 0.1, width: 0.2 };
++    const rows = packRows([{ fp }, { fp }, { fp }], 0.2 * 2 + ITEM_GAP_X + 0.01);
++    expect(rows.map((r) => r.length)).toEqual([2, 1]);
++  });
++
++  it('places units in the cell of their level and reversibility', () => {
++    const grid = { x0: 0.8, y0: 1, cell: CELL_V1 };
++    const pos = placeUnits([unit({ id: 'A', level: 2, reversibility: 'R3' })], grid, 1);
++    const [cx, cy] = gridCentre(grid, 2, 'R3');
++    expect(Math.abs(pos.A[0] - cx)).toBeLessThan(CELL_V1 / 2);
++    expect(Math.abs(pos.A[1] - cy)).toBeLessThan(CELL_V1 / 2);
++    expect(cy).toBeCloseTo(1 + 2.5 * CELL_V1, 10);
++  });
++});
++
++describe('contour canvas', () => {
++  it('converts inches to user units with y down', () => {
++    const cv = new Canvas(11, 7.5);
++    expect(cv.X(1.5)).toBe(150);
++    expect(cv.Y(0)).toBe(750);
++    expect(cv.Y(7.5)).toBe(0);
+   });
+ 
+-  it('rejects a missing required attribute', async () => {
+-    await expect(parse(`contour-beta\n unit A "a" level=0 rev=R1 reach=S`)).rejects.toThrow(/lacks the required attribute mode/);
++  it('flushes elements in z-order, then in insertion order', () => {
++    const cv = new Canvas(1, 1);
++    cv.push(5, 'rect', { id: 'late' });
++    cv.push(1, 'rect', { id: 'first' });
++    cv.push(1, 'rect', { id: 'second' });
++    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
++    cv.flush(svg);
++    expect([...svg.children].map((c) => c.getAttribute('id'))).toEqual(['first', 'second', 'late']);
+   });
+ 
+-  it('rejects values outside the scale', async () => {
+-    await expect(parse(`contour-beta\n unit A "a" level=5 rev=R1 reach=S mode=0`)).rejects.toThrow(/level=5/);
+-    await expect(parse(`contour-beta\n unit A "a" level=0 rev=R9 reach=S mode=0`)).rejects.toThrow(/rev=R9/);
++  it('places text at the matplotlib baseline', () => {
++    const cv = new Canvas(1, 1);
++    cv.text(0.5, 0.5, 'x', { size: 9, va: 'center' });
++    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
++    cv.flush(svg);
++    const text = svg.querySelector('text')!;
++    const fs = 9 * (100 / 72);
++    expect(Number(text.getAttribute('font-size'))).toBeCloseTo(fs, 2);
++    expect(Number(text.getAttribute('y'))).toBeCloseTo(50 + ((0.96875 - 0.2412) / 2) * fs, 1);
+   });
+ 
+-  it('rejects a duplicate id and an unknown attribute', async () => {
+-    const u = 'level=0 rev=R1 reach=S mode=0';
+-    await expect(parse(`contour-beta\n unit A "a" ${u}\n unit A "b" ${u}`)).rejects.toThrow(/twice/);
+-    await expect(parse(`contour-beta\n unit A "a" ${u} colour=red`)).rejects.toThrow(/unknown attribute/);
++  it('defines a hatch pattern and refers to it', () => {
++    const cv = new Canvas(1, 1);
++    cv.rect(0, 0, 1, 1, { face: '#fff', hatch: '#000' });
++    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
++    cv.flush(svg);
++    expect(svg.querySelectorAll('pattern line')).toHaveLength(25);
++    expect(svg.querySelectorAll('rect')[1].getAttribute('fill')).toMatch(
++      /^url\(#contour-hatch-\d+\)$/
++    );
+   });
+ });
+diff --git a/packages/mermaid/src/diagrams/contour/db.ts b/packages/mermaid/src/diagrams/contour/db.ts
+index 479c3b0..c47ff59 100644
+--- a/packages/mermaid/src/diagrams/contour/db.ts
++++ b/packages/mermaid/src/diagrams/contour/db.ts
+@@ -8,25 +8,31 @@ import {
+   setAccTitle,
+   setDiagramTitle,
+ } from '../common/commonDb.js';
+-import type { ContourUnit } from './types.js';
++import type { ContourModel } from './types.js';
++
++const emptyModel = (): Omit<ContourModel, 'title'> => ({
++  view: 'landscape',
++  subtitle: '',
++  footer: [],
++  panels: [],
++  suppliers: [],
++});
+ 
+ export class ContourDB implements DiagramDB {
+-  private units: ContourUnit[] = [];
++  private model: Omit<ContourModel, 'title'> = emptyModel();
+ 
+-  public addUnit(unit: ContourUnit) {
+-    if (this.units.some((u) => u.id === unit.id)) {
+-      throw new Error(`Contour unit "${unit.id}" is declared twice.`);
+-    }
+-    this.units.push(unit);
++  public setModel(model: Omit<ContourModel, 'title'>) {
++    this.model = model;
+   }
+ 
+-  public getUnits() {
+-    return this.units;
++  /** The validated model, with the diagram title from the common DB. */
++  public getModel(): ContourModel {
++    return { ...this.model, title: getDiagramTitle() };
+   }
+ 
+   public clear() {
+     commonClear();
+-    this.units = [];
++    this.model = emptyModel();
+   }
+ 
+   public setAccTitle = setAccTitle;
+diff --git a/packages/mermaid/src/diagrams/contour/parser.ts b/packages/mermaid/src/diagrams/contour/parser.ts
+index 1709b6d..9650ba2 100644
+--- a/packages/mermaid/src/diagrams/contour/parser.ts
++++ b/packages/mermaid/src/diagrams/contour/parser.ts
+@@ -1,64 +1,283 @@
+-import type { Contour } from '@mermaid-js/parser';
++import type { Contour, ContourAttr } from '@mermaid-js/parser';
+ import { parse } from '@mermaid-js/parser';
+ import type { ParserDefinition } from '../../diagram-api/types.js';
+ import { log } from '../../logger.js';
+ import { populateCommonDb } from '../common/populateCommonDb.js';
+ import { ContourDB } from './db.js';
+-import type { ContourUnit } from './types.js';
+-import { EVIDENCE, IDENTITY, POLICY, REACH, REVERSIBILITY, TIERS } from './types.js';
++import type {
++  ContourModel,
++  ContourPanel,
++  ContourSupplier,
++  ContourUnit,
++  ContourView,
++  EvidenceKind,
++} from './types.js';
++import {
++  EVIDENCE,
++  EVIDENCE_KINDS,
++  HOSTING,
++  IDENTITY,
++  JURISDICTIONS,
++  OPERATED_BY,
++  POLICY,
++  REACH,
++  REVERSIBILITY,
++  STATUS,
++  SUPPLIER_ROLES,
++  TIERS,
++  VIEWS,
++} from './types.js';
+ 
+-const oneOf = <T extends string>(unit: string, key: string, value: string, allowed: readonly T[]) => {
+-  if (!(allowed as readonly string[]).includes(value)) {
+-    throw new Error(`Contour unit ${unit}: ${key}=${value} is not one of ${allowed.join(', ')}.`);
++const UNIT_ATTRIBUTES = [
++  'level',
++  'rev',
++  'reach',
++  'mode',
++  'identity',
++  'policy',
++  'tier',
++  'evidence',
++  'status',
++  'kinds',
++  'hosting',
++  'operated_by',
++  'suppliers',
++] as const;
++const SUPPLIER_ATTRIBUTES = ['role', 'jurisdiction'] as const;
++const REQUIRED_UNIT_ATTRIBUTES = ['level', 'rev', 'reach', 'mode'] as const;
++
++type Attributes = Record<string, string>;
++
++/** A comma list may be written with or without spaces after the commas. */
++const compact = (value: string): string => value.replace(/\s+/g, '');
++
++const splitList = (value: string | undefined): string[] =>
++  value === undefined ? [] : compact(value).split(',');
++
++/**
++ * Collects `key=value` attributes, rejecting repeated and unknown keys.
++ *
++ * @param subject - What the attributes belong to, for the message, such as "unit NR-BT".
++ */
++const collectAttributes = (
++  subject: string,
++  attrs: ContourAttr[],
++  known: readonly string[]
++): Attributes => {
++  const collected: Attributes = {};
++  for (const { key, value } of attrs) {
++    if (key in collected) {
++      throw new Error(`Contour ${subject}: ${key} is given twice.`);
++    }
++    if (!known.includes(key)) {
++      throw new Error(`Contour ${subject}: unknown attribute ${key}. Known: ${known.join(', ')}.`);
++    }
++    collected[key] = compact(String(value));
++  }
++  return collected;
++};
++
++const oneOf = <T extends string>(
++  subject: string,
++  key: string,
++  value: string | undefined,
++  allowed: readonly T[]
++): T => {
++  if (value === undefined || !(allowed as readonly string[]).includes(value)) {
++    throw new Error(
++      `Contour ${subject}: ${key}=${value ?? ''} is not one of ${allowed.join(', ')}.`
++    );
+   }
+   return value as T;
+ };
+ 
+-const int = (unit: string, key: string, value: string, min: number, max: number) => {
++const integer = (
++  subject: string,
++  key: string,
++  value: string | undefined,
++  min: number,
++  max: number
++): number => {
+   const n = Number(value);
+-  if (!Number.isInteger(n) || n < min || n > max) {
+-    throw new Error(`Contour unit ${unit}: ${key}=${value} must be an integer from ${min} to ${max}.`);
++  if (value === undefined || !Number.isInteger(n) || n < min || n > max) {
++    throw new Error(
++      `Contour ${subject}: ${key}=${value ?? ''} must be an integer from ${min} to ${max}.`
++    );
+   }
+   return n;
+ };
+ 
+-const populate = (ast: Contour, db: ContourDB) => {
+-  populateCommonDb(ast, db);
+-  for (const { id, name, attrs } of ast.units) {
+-    const a: Record<string, string> = {};
+-    for (const { key, value } of attrs) {
+-      if (key in a) {
+-        throw new Error(`Contour unit ${id}: ${key} is given twice.`);
+-      }
+-      a[key] = String(value);
++const buildUnit = (
++  id: string,
++  name: string,
++  attrs: ContourAttr[],
++  actions: [string, number][]
++): ContourUnit => {
++  const subject = `unit ${id}`;
++  const a = collectAttributes(subject, attrs, UNIT_ATTRIBUTES);
++  for (const required of REQUIRED_UNIT_ATTRIBUTES) {
++    if (!(required in a)) {
++      throw new Error(`Contour ${subject} lacks the required attribute ${required}.`);
++    }
++  }
++  const kinds = splitList(a.kinds).map((kind) => {
++    if (!(EVIDENCE_KINDS as readonly string[]).includes(kind)) {
++      throw new Error(
++        `Contour ${subject}: kinds has "${kind}", expected ${EVIDENCE_KINDS.join(', ')}.`
++      );
++    }
++    return kind as EvidenceKind;
++  });
++  // Absences are drawn as absences: a missing value is "none", never a guess.
++  return {
++    id,
++    name,
++    level: integer(subject, 'level', a.level, 0, 4),
++    reversibility: oneOf(subject, 'rev', a.rev, REVERSIBILITY),
++    reach: oneOf(subject, 'reach', a.reach, REACH),
++    mode: integer(subject, 'mode', a.mode, 0, 5),
++    identity: oneOf(subject, 'identity', a.identity ?? 'person', IDENTITY),
++    policy: oneOf(subject, 'policy', a.policy ?? 'none', POLICY),
++    tier: oneOf(subject, 'tier', a.tier ?? 'T0', TIERS),
++    evidence: oneOf(subject, 'evidence', a.evidence ?? 'none', EVIDENCE),
++    status: oneOf(subject, 'status', a.status ?? 'active', STATUS),
++    kinds,
++    hosting: oneOf(subject, 'hosting', a.hosting ?? 'unknown', HOSTING),
++    operatedBy: oneOf(subject, 'operated_by', a.operated_by ?? 'self', OPERATED_BY),
++    suppliers: splitList(a.suppliers),
++    actions,
++  };
++};
++
++const buildSupplier = (
++  id: string,
++  label: string,
++  location: string | undefined,
++  attrs: ContourAttr[]
++): ContourSupplier => {
++  const subject = `supplier ${id}`;
++  const a = collectAttributes(subject, attrs, SUPPLIER_ATTRIBUTES);
++  for (const required of SUPPLIER_ATTRIBUTES) {
++    if (!(required in a)) {
++      throw new Error(`Contour ${subject} lacks the required attribute ${required}.`);
+     }
+-    for (const required of ['level', 'rev', 'reach', 'mode']) {
+-      if (!(required in a)) {
+-        throw new Error(`Contour unit ${id} lacks the required attribute ${required}.`);
++  }
++  return {
++    id,
++    label,
++    location: location ?? null,
++    role: oneOf(subject, 'role', a.role, SUPPLIER_ROLES),
++    jurisdiction: oneOf(subject, 'jurisdiction', a.jurisdiction, JURISDICTIONS),
++  };
++};
++
++/**
++ * Turns the syntax tree into a validated model. The statements are walked in source order, so a
++ * message can name the unit it is about.
++ */
++export const buildModel = (ast: Contour): Omit<ContourModel, 'title'> => {
++  let declaredView: ContourView | null = null;
++  let subtitle = '';
++  const footer: string[] = [];
++  const panels: ContourPanel[] = [];
++  const suppliers: ContourSupplier[] = [];
++  let implicitPanel: ContourPanel | null = null;
++  let last: ContourUnit | null = null;
++
++  for (const statement of ast.statements) {
++    switch (statement.$type) {
++      case 'ContourView':
++        if (!(VIEWS as readonly string[]).includes(statement.name)) {
++          throw new Error(`Contour: view must be one of ${VIEWS.join(', ')}.`);
++        }
++        declaredView = statement.name as ContourView;
++        break;
++      case 'ContourSubtitle':
++        subtitle = statement.text;
++        break;
++      case 'ContourFooter':
++        footer.push(statement.text);
++        break;
++      case 'ContourPanel':
++        if (implicitPanel?.units.length) {
++          throw new Error(
++            `Contour unit ${implicitPanel.units[0].id} is declared before the first panel. ` +
++              'Either declare every unit under a panel, or declare no panels.'
++          );
++        }
++        panels.push({ name: statement.name, units: [] });
++        last = null;
++        break;
++      case 'ContourSupplier': {
++        const supplierId = String(statement.id);
++        if (suppliers.some((s) => s.id === supplierId)) {
++          throw new Error(`Contour supplier ${supplierId} is declared twice.`);
++        }
++        suppliers.push(
++          buildSupplier(supplierId, statement.label, statement.location, statement.attrs)
++        );
++        break;
++      }
++      case 'ContourAction':
++        if (!last) {
++          throw new Error(
++            `Contour: the action "${statement.name}" belongs under a unit, but no unit precedes it.`
++          );
++        }
++        if (statement.level > 4) {
++          throw new Error(
++            `Contour unit ${last.id}: action "${statement.name}" has level ${statement.level}, ` +
++              'expected an integer from 0 to 4.'
++          );
++        }
++        last.actions.push([statement.name, statement.level]);
++        break;
++      case 'ContourUnit': {
++        last = buildUnit(String(statement.id), statement.name, statement.attrs, []);
++        if (!panels.length) {
++          implicitPanel = { name: '', units: [] };
++          panels.push(implicitPanel);
++        }
++        panels[panels.length - 1].units.push(last);
++        break;
+       }
+     }
+-    const known = ['level', 'rev', 'reach', 'mode', 'identity', 'policy', 'tier', 'evidence'];
+-    for (const key of Object.keys(a)) {
+-      if (!known.includes(key)) {
+-        throw new Error(`Contour unit ${id}: unknown attribute ${key}. Known: ${known.join(', ')}.`);
++  }
++
++  if (panels.length > 2) {
++    throw new Error(
++      'Contour: at most two panels (view year takes a start and an end, view compare two organisations).'
++    );
++  }
++  const view: ContourView = declaredView ?? (panels.length === 2 ? 'compare' : 'landscape');
++  if ((view === 'compare' || view === 'year') && panels.length !== 2) {
++    throw new Error(`Contour: view ${view} needs two panels.`);
++  }
++  if (view !== 'compare' && view !== 'year' && panels.length > 1) {
++    throw new Error(`Contour: view ${view} takes one panel.`);
++  }
++
++  // Ids are unique; only the year view repeats an id, once in each of its two panels.
++  const seen = new Set<string>();
++  for (const [index, panel] of panels.entries()) {
++    const inPanel = new Set<string>();
++    for (const unit of panel.units) {
++      if (inPanel.has(unit.id) || (seen.has(unit.id) && view !== 'year')) {
++        throw new Error(`Contour unit ${unit.id} is declared twice.`);
+       }
++      inPanel.add(unit.id);
++    }
++    if (index === 0 || view !== 'year') {
++      inPanel.forEach((id) => seen.add(id));
+     }
+-    // Absences are drawn as absences: an unknown value is "none", not a guess.
+-    const unit: ContourUnit = {
+-      id,
+-      name,
+-      level: int(id, 'level', a.level, 0, 4),
+-      reversibility: REVERSIBILITY.indexOf(oneOf(id, 'rev', a.rev, REVERSIBILITY)) + 1,
+-      reach: oneOf(id, 'reach', a.reach, REACH),
+-      mode: int(id, 'mode', a.mode, 0, 5),
+-      identity: oneOf(id, 'identity', a.identity ?? 'person', IDENTITY),
+-      policy: oneOf(id, 'policy', a.policy ?? 'none', POLICY),
+-      tier: oneOf(id, 'tier', a.tier ?? 'T0', TIERS),
+-      evidence: oneOf(id, 'evidence', a.evidence ?? 'none', EVIDENCE),
+-    };
+-    log.debug('Contour unit', unit);
+-    db.addUnit(unit);
+   }
++
++  return { view, subtitle, footer, panels, suppliers };
++};
++
++const populate = (ast: Contour, db: ContourDB) => {
++  populateCommonDb(ast, db);
++  db.setModel(buildModel(ast));
+ };
+ 
+ export const parser: ParserDefinition = {
+diff --git a/packages/mermaid/src/diagrams/contour/renderer.spec.ts b/packages/mermaid/src/diagrams/contour/renderer.spec.ts
+new file mode 100644
+index 0000000..4098b4f
+--- /dev/null
++++ b/packages/mermaid/src/diagrams/contour/renderer.spec.ts
+@@ -0,0 +1,200 @@
++import { beforeEach, describe, expect, it } from 'vitest';
++import type { Diagram } from '../../Diagram.js';
++import * as configApi from '../../config.js';
++import { CELL_V1, CELL_V6, FOOTER_BAND, MARGIN, ROW_LABEL_WIDTH } from './common.js';
++import { ContourDB } from './db.js';
++import { parser } from './parser.js';
++import { renderer } from './renderer.js';
++
++const diagramId = 'contour-diagram';
++
++interface RenderedMark {
++  id: string;
++  x: number;
++  y: number;
++}
++
++const svgElement = () => document.querySelector(`#${diagramId}`)!;
++
++/** Reads the invisible markers that the drawing of each mark leaves behind, in inches. */
++const readMarks = (): RenderedMark[] =>
++  [...svgElement().querySelectorAll('desc[data-unit]')].map((marker) => ({
++    id: marker.getAttribute('data-unit') ?? '',
++    x: Number(marker.getAttribute('data-x')),
++    y: Number(marker.getAttribute('data-y')),
++  }));
++
++const texts = () => [...svgElement().querySelectorAll('text')].map((t) => t.textContent);
++
++const renderContour = async (text: string) => {
++  configApi.reset();
++  document.body.innerHTML = `<svg id="${diagramId}"></svg>`;
++  const db = new ContourDB();
++  parser.parser = { yy: db } as never;
++  await parser.parse(text);
++  await renderer.draw(text, diagramId, 'test', { db } as unknown as Diagram);
++  return readMarks();
++};
++
++const U = 'level=2 rev=R1 reach=S mode=3';
++
++describe('contour renderer', () => {
++  beforeEach(() => {
++    configApi.reset();
++  });
++
++  describe('V1, the landscape on one page', () => {
++    it('is 11 by 7.5 inches, 100 user units to the inch', async () => {
++      await renderContour(`contour-beta\n panel "Nordvik Region"\n unit A "a" ${U}`);
++      expect(svgElement().getAttribute('viewBox')).toBe('0 0 1100 750');
++      expect(svgElement().getAttribute('style')).toContain('max-width: 1100px');
++    });
++
++    it('puts a lone mark where the layout of its cell says', async () => {
++      const [mark] = await renderContour(`contour-beta\n panel "P"\n unit A "a" ${U}`);
++      // grid origin: x0 = margin + row label; y0 centres the 4 rows between the bands
++      const x0 = MARGIN + ROW_LABEL_WIDTH;
++      const y0 = FOOTER_BAND + 0.45 + (7.5 - 0.55 - FOOTER_BAND - (4 * CELL_V1 + 0.45)) / 2;
++      // a small mark with its label beside it: left 0.14, right 0.265, up 0.105, down 0.15
++      const cx = x0 + 2.5 * CELL_V1 - 0.405 / 2 + 0.14;
++      const cy = y0 + 0.5 * CELL_V1 + 0.255 / 2 - 0.105;
++      expect(mark.id).toBe('A');
++      expect(mark.x).toBeCloseTo(cx, 4);
++      expect(mark.y).toBeCloseTo(cy, 4);
++    });
++
++    it('draws every unit once, in the cell of its level and reversibility', async () => {
++      const marks = await renderContour(`contour-beta
++        unit A "a" level=0 rev=R1 reach=S mode=0
++        unit B "b" level=4 rev=R4 reach=XL mode=5 identity=own
++        unit C "c" level=2 rev=R2 reach=M mode=2 policy=enforced tier=T2 evidence=attested
++        unit D "d" level=2 rev=R2 reach=M mode=2
++      `);
++      expect(marks.map((m) => m.id).sort()).toEqual(['A', 'B', 'C', 'D']);
++      const x0 = MARGIN + ROW_LABEL_WIDTH;
++      const column = (m: RenderedMark) => Math.floor((m.x - x0) / CELL_V1);
++      const byId = Object.fromEntries(marks.map((m) => [m.id, m]));
++      expect([byId.A, byId.B, byId.C, byId.D].map(column)).toEqual([0, 4, 2, 2]);
++      // R4 is the top row, R1 the bottom row
++      expect(byId.B.y).toBeGreaterThan(byId.C.y);
++      expect(byId.C.y).toBeGreaterThan(byId.A.y);
++      // two units in one cell do not overlap
++      expect(Math.abs(byId.C.x - byId.D.x) + Math.abs(byId.C.y - byId.D.y)).toBeGreaterThan(0.1);
++    });
++
++    it('is deterministic', async () => {
++      const text = `contour-beta\n unit A "a" ${U}\n unit B "b" ${U}\n unit C "c" ${U}`;
++      expect(await renderContour(text)).toEqual(await renderContour(text));
++    });
++
++    it('writes the title, subtitle and footer lines, and the legend', async () => {
++      await renderContour(`contour-beta
++        title The title
++        subtitle "The subtitle"
++        footer "First footer"
++        footer "Second footer"
++        unit A "a" ${U}
++      `);
++      const all = texts();
++      expect(all).toEqual(
++        expect.arrayContaining([
++          'The title',
++          'The subtitle',
++          'First footer',
++          'Second footer',
++          'Columns: autonomy level',
++          'the empty corner',
++          'Supervised',
++        ])
++      );
++    });
++
++    it('draws an empty landscape for a diagram without units', async () => {
++      const marks = await renderContour('contour-beta\n');
++      expect(marks).toEqual([]);
++      expect(svgElement().getAttribute('viewBox')).toBe('0 0 1100 750');
++    });
++
++    it('draws a circle for a person and a rounded square for an identity of its own', async () => {
++      await renderContour(`contour-beta
++        unit A "a" level=0 rev=R1 reach=S mode=0
++        unit B "b" level=1 rev=R1 reach=S mode=0 identity=own
++      `);
++      // the marks have a 1.4 pt outline, which the swatches of the legend do not
++      const outlined = (el: Element) => el.getAttribute('stroke-width') === '1.94';
++      expect([...svgElement().querySelectorAll('circle')].filter(outlined)).toHaveLength(1);
++      expect([...svgElement().querySelectorAll('rect[rx]')].filter(outlined)).toHaveLength(1);
++    });
++
++    it('outlines a Level 3 unit without an enforced policy point in the warning colour', async () => {
++      await renderContour(`contour-beta
++        unit A "a" level=3 rev=R2 reach=S mode=0
++        unit B "b" level=3 rev=R2 reach=S mode=0 policy=enforced
++      `);
++      const outlines = [...svgElement().querySelectorAll('circle')].filter(
++        (c) => c.getAttribute('stroke') === '#C0392B'
++      );
++      expect(outlines).toHaveLength(1);
++    });
++  });
++
++  describe('V6, the comparison of two landscapes', () => {
++    const compare = `contour-beta
++      panel "One"
++        unit A "a" ${U}
++        unit B "b" level=0 rev=R3 reach=L mode=1
++      panel "Two"
++        unit C "c" ${U}
++    `;
++
++    it('is 16 by 8 inches', async () => {
++      await renderContour(compare);
++      expect(svgElement().getAttribute('viewBox')).toBe('0 0 1600 800');
++    });
++
++    it('draws the panels side by side with a summary under each', async () => {
++      const marks = await renderContour(compare);
++      expect(marks.map((m) => m.id).sort()).toEqual(['A', 'B', 'C']);
++      const byId = Object.fromEntries(marks.map((m) => [m.id, m]));
++      const xLeft = MARGIN + ROW_LABEL_WIDTH;
++      expect(byId.A.x).toBeGreaterThan(xLeft);
++      expect(byId.A.x).toBeLessThan(xLeft + 5 * CELL_V6);
++      // the second panel starts to the right of the first and of the legend
++      expect(byId.C.x).toBeGreaterThan(xLeft + 5 * CELL_V6 + 1.7);
++      expect(texts()).toEqual(
++        expect.arrayContaining([
++          'One · 2 units',
++          'Two · 1 units',
++          'Units drawn: 2',
++          'Units drawn: 1',
++        ])
++      );
++    });
++
++    it('labels the rows once, on the left panel', async () => {
++      await renderContour(compare);
++      expect(texts().filter((t) => t === 'Reversible at once')).toHaveLength(1);
++    });
++
++    it('places the same unit at the same cell offset in both panels', async () => {
++      const marks = await renderContour(compare);
++      const byId = Object.fromEntries(marks.map((m) => [m.id, m]));
++      const xLeft = MARGIN + ROW_LABEL_WIDTH;
++      // A and C are the same unit, drawn in two panels with the same grid origin y
++      expect(byId.A.y).toBeCloseTo(byId.C.y, 6);
++      expect(byId.C.x - byId.A.x).toBeGreaterThan(5 * CELL_V6);
++      expect(xLeft).toBeGreaterThan(0);
++    });
++  });
++
++  describe('views that are not drawn yet', () => {
++    it.each(['year', 'supply', 'decisions', 'evidence'])('says so for %s', async (view) => {
++      const panels = `panel "One"\n unit A "a" ${U}\n${
++        view === 'year' ? ' panel "Two"\n unit A "a" level=3 rev=R1 reach=S mode=3\n' : ''
++      }`;
++      await expect(renderContour(`contour-beta\n view ${view}\n ${panels}`)).rejects.toThrow(
++        `contour: view ${view} is not implemented`
++      );
++    });
++  });
++});
+diff --git a/packages/mermaid/src/diagrams/contour/renderer.ts b/packages/mermaid/src/diagrams/contour/renderer.ts
+index 362d48e..8eec4af 100644
+--- a/packages/mermaid/src/diagrams/contour/renderer.ts
++++ b/packages/mermaid/src/diagrams/contour/renderer.ts
+@@ -2,108 +2,44 @@ import type { Diagram } from '../../Diagram.js';
+ import type { DiagramRenderer, DrawDefinition, SVG } from '../../diagram-api/types.js';
+ import { selectSvgElement } from '../../rendering-util/selectSvgElement.js';
+ import { configureSvgSize } from '../../setupGraphViewbox.js';
+-import type { ContourDB, ContourUnit } from './types.js';
+-
+-const LEVELS = ['Advisory', 'Assisted', 'Supervised', 'Bounded', 'Autonomous'];
+-const ROWS = ['R1 Reversible at once', 'R2', 'R3', 'R4 Irreversible'];
+-const HALF_SIZE = { S: 7, M: 10, L: 14, XL: 19 };
+-const MODE_COLOURS = ['#7890B0', '#3B82F6', '#40A090', '#C88000', '#1B3A7A', '#B2367D'];
+-
+-const LEFT = 130;
+-const TOP = 50;
+-const CELL_W = 120;
+-const CELL_H = 90;
+-const WIDTH = LEFT + CELL_W * 5 + 10;
+-const HEIGHT = TOP + CELL_H * 4 + 10;
++import type { Canvas } from './canvas.js';
++import { IN } from './common.js';
++import type { ContourDB, ContourModel } from './types.js';
++import { layoutDecisions } from './views/decisions.js';
++import { layoutEvidence } from './views/evidence.js';
++import { layoutLandscapeOrCompare } from './views/landscape.js';
++import { layoutSupply } from './views/supply.js';
++import { layoutYear } from './views/year.js';
++
++/** Builds the canvas of the view the model asks for. */
++export const layoutContour = (model: ContourModel): Canvas => {
++  switch (model.view) {
++    case 'decisions':
++      return layoutDecisions(model);
++    case 'evidence':
++      return layoutEvidence(model);
++    case 'year':
++      return layoutYear(model);
++    case 'supply':
++      return layoutSupply(model);
++    case 'landscape':
++    case 'compare':
++      return layoutLandscapeOrCompare(model);
++  }
++};
+ 
+ const draw: DrawDefinition = (_text, id, _version, diagram: Diagram) => {
+   const db = diagram.db as ContourDB;
++  const cv = layoutContour(db.getModel());
++  const width = cv.width * IN;
++  const height = cv.height * IN;
+   const svg: SVG = selectSvgElement(id);
+-  svg.attr('viewBox', `0 0 ${WIDTH} ${HEIGHT}`);
+-  configureSvgSize(svg, HEIGHT, WIDTH, true);
+-
+-  svg
+-    .append('text')
+-    .attr('x', LEFT)
+-    .attr('y', 22)
+-    .attr('class', 'contourTitle')
+-    .text(db.getDiagramTitle());
+-
+-  LEVELS.forEach((name, c) => {
+-    svg
+-      .append('text')
+-      .attr('x', LEFT + CELL_W * c + CELL_W / 2)
+-      .attr('y', TOP - 8)
+-      .attr('text-anchor', 'middle')
+-      .attr('class', 'contourAxis')
+-      .text(`Level ${c} ${name}`);
+-  });
+-  ROWS.forEach((name, r) => {
+-    svg
+-      .append('text')
+-      .attr('x', LEFT - 8)
+-      .attr('y', TOP + CELL_H * r + CELL_H / 2)
+-      .attr('text-anchor', 'end')
+-      .attr('class', 'contourAxis')
+-      .text(name);
+-  });
+-  for (let c = 0; c < 5; c++) {
+-    for (let r = 0; r < 4; r++) {
+-      svg
+-        .append('rect')
+-        .attr('x', LEFT + CELL_W * c)
+-        .attr('y', TOP + CELL_H * r)
+-        .attr('width', CELL_W)
+-        .attr('height', CELL_H)
+-        .attr('class', c === 4 && r >= 2 ? 'contourEmptyCorner' : 'contourCell');
+-    }
+-  }
+-
+-  const cells = new Map<string, ContourUnit[]>();
+-  for (const u of db.getUnits()) {
+-    const key = `${u.level},${u.reversibility}`;
+-    cells.set(key, [...(cells.get(key) ?? []), u]);
+-  }
+-  for (const units of cells.values()) {
+-    units.forEach((u, i) => {
+-      const x = LEFT + CELL_W * u.level + (CELL_W / (units.length + 1)) * (i + 1);
+-      const y = TOP + CELL_H * (u.reversibility - 1) + CELL_H / 2;
+-      drawMark(svg, u, x, y);
+-    });
+-  }
+-};
+-
+-const drawMark = (svg: SVG, u: ContourUnit, x: number, y: number) => {
+-  const s = HALF_SIZE[u.reach];
+-  const g = svg.append('g').attr('data-unit', u.id);
+-  const fill = MODE_COLOURS[u.mode];
+-  if (u.identity === 'own') {
+-    g.append('rect')
+-      .attr('x', x - s).attr('y', y - s).attr('width', 2 * s).attr('height', 2 * s)
+-      .attr('rx', 4).attr('fill', fill).attr('class', 'contourMark');
+-  } else {
+-    g.append('circle').attr('cx', x).attr('cy', y).attr('r', s).attr('fill', fill).attr('class', 'contourMark');
+-  }
+-  g.append('text').attr('x', x).attr('y', y + 4).attr('text-anchor', 'middle')
+-    .attr('class', 'contourDigit').text(u.mode);
+-  if (u.policy !== 'none') {
+-    g.append('path')
+-      .attr('d', `M${x + s} ${y - s - 7} l6 6 l-6 6 l-6 -6 z`)
+-      .attr('fill', u.policy === 'enforced' ? '#111827' : 'none')
+-      .attr('class', 'contourDiamond');
+-  }
+-  if (u.tier !== 'T0') {
+-    g.append('text').attr('x', x - s - 4).attr('y', y - s).attr('text-anchor', 'end')
+-      .attr('class', 'contourSeat').text(u.tier);
+-  }
+-  if (u.evidence !== 'none') {
+-    g.append('line')
+-      .attr('x1', x - s).attr('x2', x + s).attr('y1', y + s + 4).attr('y2', y + s + 4)
+-      .attr('stroke-dasharray', u.evidence === 'attested' ? '3 2' : null)
+-      .attr('class', 'contourBaseline');
++  svg.attr('viewBox', `0 0 ${width} ${height}`);
++  configureSvgSize(svg, height, width, true);
++  const node = svg.node();
++  if (node) {
++    cv.flush(node);
+   }
+-  g.append('text').attr('x', x).attr('y', y + s + 16).attr('text-anchor', 'middle')
+-    .attr('class', 'contourId').text(u.id);
+ };
+ 
+ export const renderer: DiagramRenderer = { draw };
+diff --git a/packages/mermaid/src/diagrams/contour/styles.ts b/packages/mermaid/src/diagrams/contour/styles.ts
+index 496eee4..c1869cb 100644
+--- a/packages/mermaid/src/diagrams/contour/styles.ts
++++ b/packages/mermaid/src/diagrams/contour/styles.ts
+@@ -1,15 +1,6 @@
+ import type { DiagramStylesProvider } from '../../diagram-api/types.js';
+ 
+-export const styles: DiagramStylesProvider = () => `
+-	.contourTitle { font-size: 16px; font-weight: 600; fill: #111827; }
+-	.contourAxis { font-size: 10px; fill: #374151; }
+-	.contourCell { fill: none; stroke: #d1d5db; }
+-	.contourEmptyCorner { fill: #fef2f2; stroke: #d1d5db; }
+-	.contourMark { stroke: #111827; }
+-	.contourDigit { font-size: 11px; font-weight: 700; fill: #111827; }
+-	.contourId, .contourSeat { font-size: 9px; fill: #374151; }
+-	.contourDiamond { stroke: #111827; }
+-	.contourBaseline { stroke: #111827; stroke-width: 2; }
+-`;
++/** Contour draws every mark with explicit attributes, so that the pixels do not depend on a theme. */
++export const styles: DiagramStylesProvider = () => '';
+ 
+ export default styles;
+diff --git a/packages/mermaid/src/diagrams/contour/types.ts b/packages/mermaid/src/diagrams/contour/types.ts
+index 4d23b3b..6b3dcad 100644
+--- a/packages/mermaid/src/diagrams/contour/types.ts
++++ b/packages/mermaid/src/diagrams/contour/types.ts
+@@ -1,29 +1,90 @@
+ import type { DiagramDBBase } from '../../diagram-api/types.js';
+ 
++/** Reversibility tiers, in grid order: R1 is the bottom row of the grid, R4 the top row. */
+ export const REVERSIBILITY = ['R1', 'R2', 'R3', 'R4'] as const;
+ export const REACH = ['S', 'M', 'L', 'XL'] as const;
+ export const IDENTITY = ['person', 'own'] as const;
+ export const POLICY = ['enforced', 'planned', 'none'] as const;
+ export const TIERS = ['T0', 'T1', 'T2', 'T3', 'T4'] as const;
+ export const EVIDENCE = ['automatic', 'attested', 'none'] as const;
++export const STATUS = ['active', 'pilot', 'paused', 'retired'] as const;
++export const HOSTING = [
++  'own-premises',
++  'eu-supplier',
++  'eea-supplier',
++  'non-eu-supplier',
++  'unknown',
++] as const;
++export const OPERATED_BY = ['self', 'supplier'] as const;
++export const SUPPLIER_ROLES = ['model', 'hosting', 'application', 'operations'] as const;
++export const JURISDICTIONS = ['EU', 'EEA', 'non-EU'] as const;
++/** The evidence kinds a unit may list (the evidence view also has a column for none). */
++export const EVIDENCE_KINDS = ['logs', 'tests', 'gates', 'attestations'] as const;
++export const VIEWS = ['landscape', 'year', 'supply', 'decisions', 'evidence', 'compare'] as const;
+ 
++export type Reversibility = (typeof REVERSIBILITY)[number];
++export type Reach = (typeof REACH)[number];
++export type Identity = (typeof IDENTITY)[number];
++export type Policy = (typeof POLICY)[number];
++export type Tier = (typeof TIERS)[number];
++export type Evidence = (typeof EVIDENCE)[number];
++export type Status = (typeof STATUS)[number];
++export type Hosting = (typeof HOSTING)[number];
++export type OperatedBy = (typeof OPERATED_BY)[number];
++export type SupplierRole = (typeof SUPPLIER_ROLES)[number];
++export type Jurisdiction = (typeof JURISDICTIONS)[number];
++export type EvidenceKind = (typeof EVIDENCE_KINDS)[number];
++export type ContourView = (typeof VIEWS)[number];
++
++/** One AI use, drawn as one mark. */
+ export interface ContourUnit {
+   id: string;
+   name: string;
+   /** Autonomy level, 0 (Advisory) to 4 (Autonomous). */
+   level: number;
+-  /** Reversibility tier, 1 (R1) to 4 (R4). */
+-  reversibility: number;
+-  reach: (typeof REACH)[number];
++  /** Reversibility tier, R1 (reversible at once) to R4 (irreversible). */
++  reversibility: Reversibility;
++  reach: Reach;
+   /** Usage mode, 0 (Ambient AI) to 5 (Autonomous production agents). */
+   mode: number;
+-  identity: (typeof IDENTITY)[number];
+-  policy: (typeof POLICY)[number];
+-  tier: (typeof TIERS)[number];
+-  evidence: (typeof EVIDENCE)[number];
++  identity: Identity;
++  policy: Policy;
++  tier: Tier;
++  evidence: Evidence;
++  status: Status;
++  kinds: EvidenceKind[];
++  hosting: Hosting;
++  operatedBy: OperatedBy;
++  /** Ids of the suppliers the unit relies on (view V3). */
++  suppliers: string[];
++  /** Action classes with their autonomy level (view V4): [name, level]. */
++  actions: [string, number][];
++}
++
++export interface ContourPanel {
++  name: string;
++  units: ContourUnit[];
++}
++
++export interface ContourSupplier {
++  id: string;
++  label: string;
++  location: string | null;
++  role: SupplierRole;
++  jurisdiction: Jurisdiction;
++}
++
++/** Everything the layout of a view needs. */
++export interface ContourModel {
++  view: ContourView;
++  title: string;
++  subtitle: string;
++  footer: string[];
++  panels: ContourPanel[];
++  suppliers: ContourSupplier[];
+ }
+ 
+ export interface ContourDB extends DiagramDBBase<Record<string, never>> {
+-  addUnit: (unit: ContourUnit) => void;
+-  getUnits: () => ContourUnit[];
++  setModel: (model: Omit<ContourModel, 'title'>) => void;
++  getModel: () => ContourModel;
+ }
+diff --git a/packages/mermaid/src/diagrams/contour/views/decisions.ts b/packages/mermaid/src/diagrams/contour/views/decisions.ts
+new file mode 100644
+index 0000000..083cac0
+--- /dev/null
++++ b/packages/mermaid/src/diagrams/contour/views/decisions.ts
+@@ -0,0 +1,7 @@
++import type { Canvas } from '../canvas.js';
++import type { ContourModel } from '../types.js';
++
++/** V4 The decision-rights view. */
++export function layoutDecisions(_model: ContourModel): Canvas {
++  throw new Error('contour: view decisions is not implemented');
++}
+diff --git a/packages/mermaid/src/diagrams/contour/views/evidence.ts b/packages/mermaid/src/diagrams/contour/views/evidence.ts
+new file mode 100644
+index 0000000..98b8872
+--- /dev/null
++++ b/packages/mermaid/src/diagrams/contour/views/evidence.ts
+@@ -0,0 +1,7 @@
++import type { Canvas } from '../canvas.js';
++import type { ContourModel } from '../types.js';
++
++/** V5 The evidence view. */
++export function layoutEvidence(_model: ContourModel): Canvas {
++  throw new Error('contour: view evidence is not implemented');
++}
+diff --git a/packages/mermaid/src/diagrams/contour/views/landscape.ts b/packages/mermaid/src/diagrams/contour/views/landscape.ts
+new file mode 100644
+index 0000000..a75e6fa
+--- /dev/null
++++ b/packages/mermaid/src/diagrams/contour/views/landscape.ts
+@@ -0,0 +1,76 @@
++import { Canvas } from '../canvas.js';
++import {
++  CELL_V1,
++  CELL_V6,
++  COL_LABEL_HEIGHT,
++  FOOTER_BAND,
++  LEGEND_BOTTOM,
++  LEGEND_TOP,
++  LEGEND_WIDTH,
++  LEGEND_WIDTH_V6,
++  MARGIN,
++  MARK_SCALE_V6,
++  ROW_LABEL_WIDTH,
++  TITLE_BAND,
++  FIG,
++  FONT_SIZE,
++  drawBackground,
++  drawLegend,
++  drawPanel,
++  drawSummary,
++  drawTitleFooter,
++  round,
++} from '../common.js';
++import type { ContourModel, ContourPanel } from '../types.js';
++
++/** V1 The landscape on one page (one panel, 11 by 7.5 in) and V6 the comparison (two panels, 16 by 8 in). */
++export function layoutLandscapeOrCompare(model: ContourModel): Canvas {
++  const panels: ContourPanel[] = model.panels.length ? model.panels : [{ name: '', units: [] }];
++  const compare = panels.length === 2;
++  const cv = compare ? new Canvas(16, 8) : new Canvas(FIG.W, FIG.H);
++  drawBackground(cv);
++  drawTitleFooter(cv, model);
++  if (!compare) {
++    const x0 = MARGIN + ROW_LABEL_WIDTH;
++    const top = cv.height - TITLE_BAND;
++    const bottom = FOOTER_BAND;
++    const block = 4 * CELL_V1 + COL_LABEL_HEIGHT;
++    const y0 = round(bottom + COL_LABEL_HEIGHT + (top - bottom - block) / 2, 4);
++    drawPanel(cv, { x0, y0, cell: CELL_V1 }, panels[0].units);
++    drawLegend(
++      cv,
++      cv.width - MARGIN - LEGEND_WIDTH,
++      cv.height - LEGEND_TOP,
++      LEGEND_BOTTOM,
++      LEGEND_WIDTH
++    );
++    return cv;
++  }
++  const cell = CELL_V6;
++  const panelW = 5 * cell;
++  const legendGap = 0.2;
++  const panelTitleH = 0.3;
++  const summaryH = 0.95;
++  const xLeft = MARGIN + ROW_LABEL_WIDTH;
++  const legendX = xLeft + panelW + legendGap + 0.12;
++  const xRight = legendX + LEGEND_WIDTH_V6 + legendGap;
++  const block = panelTitleH + 4 * cell + COL_LABEL_HEIGHT + summaryH;
++  const top = cv.height - TITLE_BAND;
++  const bottom = FOOTER_BAND;
++  const y0 = round(bottom + summaryH + COL_LABEL_HEIGHT + (top - bottom - block) / 2, 4);
++  const sides: [ContourPanel, number, boolean][] = [
++    [panels[0], xLeft, true],
++    [panels[1], xRight, false],
++  ];
++  for (const [p, x0, labels] of sides) {
++    const g = { x0, y0, cell };
++    cv.text(x0, y0 + 4 * cell + 0.14, `${p.name} · ${p.units.length} units`, {
++      size: FONT_SIZE + 2,
++      weight: 'bold',
++    });
++    drawPanel(cv, g, p.units, { rowLabels: labels, scale: MARK_SCALE_V6 });
++    drawSummary(cv, x0, y0 - COL_LABEL_HEIGHT - 0.05, p.units);
++  }
++  drawLegend(cv, legendX, cv.height - LEGEND_TOP, LEGEND_BOTTOM, LEGEND_WIDTH_V6, MARK_SCALE_V6);
++  return cv;
++}
+diff --git a/packages/mermaid/src/diagrams/contour/views/supply.ts b/packages/mermaid/src/diagrams/contour/views/supply.ts
+new file mode 100644
+index 0000000..f927c9d
+--- /dev/null
++++ b/packages/mermaid/src/diagrams/contour/views/supply.ts
+@@ -0,0 +1,7 @@
++import type { Canvas } from '../canvas.js';
++import type { ContourModel } from '../types.js';
++
++/** V3 The supply and sovereignty view. */
++export function layoutSupply(_model: ContourModel): Canvas {
++  throw new Error('contour: view supply is not implemented');
++}
+diff --git a/packages/mermaid/src/diagrams/contour/views/year.ts b/packages/mermaid/src/diagrams/contour/views/year.ts
+new file mode 100644
+index 0000000..f8431ab
+--- /dev/null
++++ b/packages/mermaid/src/diagrams/contour/views/year.ts
+@@ -0,0 +1,7 @@
++import type { Canvas } from '../canvas.js';
++import type { ContourModel } from '../types.js';
++
++/** V2 The landscape over time. */
++export function layoutYear(_model: ContourModel): Canvas {
++  throw new Error('contour: view year is not implemented');
++}
+diff --git a/packages/parser/src/language/contour/contour.langium b/packages/parser/src/language/contour/contour.langium
+index ae4385b..be87aa7 100644
+--- a/packages/parser/src/language/contour/contour.langium
++++ b/packages/parser/src/language/contour/contour.langium
+@@ -1,22 +1,73 @@
+ grammar ContourGrammar
+ import "../common/common";
+ 
++// Contour: the six standard views (V1 to V6) of a landscape of AI uses, drawn from a model.
++// Statements are kept in source order in `statements`; the semantic checks (enumerations, ranges,
++// required attributes, duplicate ids, panels per view) are made by the diagram's parser.
+ entry Contour:
+   NEWLINE*
+   "contour-beta"
+   (
+     TitleAndAccessibilities
+-    | units+=ContourUnit
++    | statements+=ContourStatement
+     | NEWLINE
+   )*
+ ;
+ 
++ContourStatement:
++  ContourView
++  | ContourSubtitle
++  | ContourFooter
++  | ContourPanel
++  | ContourUnit
++  | ContourAction
++  | ContourSupplier
++;
++
++ContourView:
++  "view" name=ID EOL
++;
++
++// Free text cannot be lexed as a rest-of-line terminal without breaking the other rules,
++// so subtitle and footer take a quoted string.
++ContourSubtitle:
++  "subtitle" text=STRING EOL
++;
++
++ContourFooter:
++  "footer" text=STRING EOL
++;
++
++ContourPanel:
++  "panel" name=STRING EOL
++;
++
+ ContourUnit:
+-  "unit" id=ID name=STRING (attrs+=ContourAttr)* EOL
++  "unit" id=ContourId name=STRING (attrs+=ContourAttr)* EOL
++;
++
++ContourAction:
++  "action" name=STRING level=INT EOL
++;
++
++ContourSupplier:
++  "supplier" id=ContourId label=STRING (location=STRING)? (attrs+=ContourAttr)* EOL
+ ;
+ 
+ ContourAttr:
+   key=ID '=' value=ContourValue
+ ;
+ 
+-ContourValue returns string: ID | INT;
++// A single word or a comma separated list of words (kinds, suppliers).
++// `supplier` is a keyword and also a value (operated_by=supplier).
++ContourValue returns string:
++  ContourWord (',' ContourWord)*
++;
++
++ContourWord returns string:
++  ID | INT | 'supplier'
++;
++
++ContourId returns string:
++  ID | INT
++;
+diff --git a/packages/parser/src/language/index.ts b/packages/parser/src/language/index.ts
+index 8eb5559..01746ac 100644
+--- a/packages/parser/src/language/index.ts
++++ b/packages/parser/src/language/index.ts
+@@ -3,8 +3,15 @@ export {
+   MermaidAstType,
+   Packet,
+   Contour,
+-  ContourUnit,
++  ContourAction,
+   ContourAttr,
++  ContourFooter,
++  ContourPanel,
++  ContourStatement,
++  ContourSubtitle,
++  ContourSupplier,
++  ContourUnit,
++  ContourView,
+   isContour,
+   PacketBlock,
+   Pie,
+-- 
+2.43.0
+
