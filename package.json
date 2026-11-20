@@ -1,6 +1,6 @@
 {
   "name": "mermaid-contour",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Contour diagrams (the six standard views of the Landscape notation) as an external Mermaid diagram type",
   "license": "Apache-2.0",
   "type": "module",

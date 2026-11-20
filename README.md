@@ -137,8 +137,9 @@ Then, on either route:
 6. On npmjs.com open the package, *Settings, Trusted publishing*, choose GitHub Actions and enter the user `gunnarnordqvist`, the
    repository `Mermaid-contour` and the workflow filename `publish.yml` (all case-sensitive).
 7. Publish the next version by tag within two days (npm requires a new trusted publisher to complete its first publish in that time).
-   Without a computer: on GitHub open `package.json`, edit `version` to `0.1.1`, commit; then *Releases, Draft a new release*, create the
-   tag `v0.1.1` and publish the release. The tag starts `publish.yml`.
+   The version in `package.json` must be higher than the one on npm and equal to the tag without the `v`. Without a computer: on GitHub
+   open *Releases, Draft a new release*, in *Choose a tag* type `v0.1.1` and choose *Create new tag on publish*, target `main`, and
+   publish the release. The tag starts `publish.yml`.
 8. Delete `.github/workflows/publish-first.yml`, and under *Settings, Publishing access* on npmjs.com choose
    "Require two-factor authentication and disallow tokens".
 
