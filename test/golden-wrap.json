@@ -1,0 +1,818 @@
+[
+{
+"text": "Mode 1 Conversational assistants",
+"chars": 8,
+"lines": [
+"Mode 1 C",
+"onversat",
+"ional as",
+"sistants"
+]
+},
+{
+"text": "Mode 1 Conversational assistants",
+"chars": 14,
+"lines": [
+"Mode 1",
+"Conversational",
+"assistants"
+]
+},
+{
+"text": "Mode 1 Conversational assistants",
+"chars": 20,
+"lines": [
+"Mode 1",
+"Conversational",
+"assistants"
+]
+},
+{
+"text": "Mode 1 Conversational assistants",
+"chars": 28,
+"lines": [
+"Mode 1 Conversational",
+"assistants"
+]
+},
+{
+"text": "Mode 2 Embedded workplace assistants",
+"chars": 8,
+"lines": [
+"Mode 2",
+"Embedded",
+"workplac",
+"e assist",
+"ants"
+]
+},
+{
+"text": "Mode 2 Embedded workplace assistants",
+"chars": 14,
+"lines": [
+"Mode 2",
+"Embedded",
+"workplace",
+"assistants"
+]
+},
+{
+"text": "Mode 2 Embedded workplace assistants",
+"chars": 20,
+"lines": [
+"Mode 2 Embedded",
+"workplace assistants"
+]
+},
+{
+"text": "Mode 2 Embedded workplace assistants",
+"chars": 28,
+"lines": [
+"Mode 2 Embedded workplace",
+"assistants"
+]
+},
+{
+"text": "General-purpose model provider (exception EXC-0004, model-origin assessment GEO-2026-017)",
+"chars": 8,
+"lines": [
+"General-",
+"purpose",
+"model",
+"provider",
+"(excepti",
+"on EXC-",
+"0004,",
+"model-",
+"origin a",
+"ssessmen",
+"t GEO-",
+"2026-",
+"017)"
+]
+},
+{
+"text": "General-purpose model provider (exception EXC-0004, model-origin assessment GEO-2026-017)",
+"chars": 14,
+"lines": [
+"General-",
+"purpose model",
+"provider",
+"(exception",
+"EXC-0004,",
+"model-origin",
+"assessment",
+"GEO-2026-017)"
+]
+},
+{
+"text": "General-purpose model provider (exception EXC-0004, model-origin assessment GEO-2026-017)",
+"chars": 20,
+"lines": [
+"General-purpose",
+"model provider",
+"(exception EXC-0004,",
+"model-origin",
+"assessment",
+"GEO-2026-017)"
+]
+},
+{
+"text": "General-purpose model provider (exception EXC-0004, model-origin assessment GEO-2026-017)",
+"chars": 28,
+"lines": [
+"General-purpose model",
+"provider (exception",
+"EXC-0004, model-origin",
+"assessment GEO-2026-017)"
+]
+},
+{
+"text": "Global www.verylong-hostname.example.com/path/segment/x tail",
+"chars": 8,
+"lines": [
+"Global w",
+"ww.veryl",
+"ong-host",
+"name.exa",
+"mple.com",
+"/path/se",
+"gment/x",
+"tail"
+]
+},
+{
+"text": "Global www.verylong-hostname.example.com/path/segment/x tail",
+"chars": 14,
+"lines": [
+"Global",
+"www.verylong-h",
+"ostname.exampl",
+"e.com/path/seg",
+"ment/x tail"
+]
+},
+{
+"text": "Global www.verylong-hostname.example.com/path/segment/x tail",
+"chars": 20,
+"lines": [
+"Global www.verylong-",
+"hostname.example.com",
+"/path/segment/x tail"
+]
+},
+{
+"text": "Global www.verylong-hostname.example.com/path/segment/x tail",
+"chars": 28,
+"lines": [
+"Global www.verylong-hostname",
+".example.com/path/segment/x",
+"tail"
+]
+},
+{
+"text": "a  b  c",
+"chars": 8,
+"lines": [
+"a  b  c"
+]
+},
+{
+"text": "a  b  c",
+"chars": 14,
+"lines": [
+"a  b  c"
+]
+},
+{
+"text": "a  b  c",
+"chars": 20,
+"lines": [
+"a  b  c"
+]
+},
+{
+"text": "a  b  c",
+"chars": 28,
+"lines": [
+"a  b  c"
+]
+},
+{
+"text": "  lead",
+"chars": 8,
+"lines": [
+"  lead"
+]
+},
+{
+"text": "  lead",
+"chars": 14,
+"lines": [
+"  lead"
+]
+},
+{
+"text": "  lead",
+"chars": 20,
+"lines": [
+"  lead"
+]
+},
+{
+"text": "  lead",
+"chars": 28,
+"lines": [
+"  lead"
+]
+},
+{
+"text": "ab co--op",
+"chars": 8,
+"lines": [
+"ab co--",
+"op"
+]
+},
+{
+"text": "ab co--op",
+"chars": 14,
+"lines": [
+"ab co--op"
+]
+},
+{
+"text": "ab co--op",
+"chars": 20,
+"lines": [
+"ab co--op"
+]
+},
+{
+"text": "ab co--op",
+"chars": 28,
+"lines": [
+"ab co--op"
+]
+},
+{
+"text": "ab été-bé",
+"chars": 8,
+"lines": [
+"ab été-",
+"bé"
+]
+},
+{
+"text": "ab été-bé",
+"chars": 14,
+"lines": [
+"ab été-bé"
+]
+},
+{
+"text": "ab été-bé",
+"chars": 20,
+"lines": [
+"ab été-bé"
+]
+},
+{
+"text": "ab été-bé",
+"chars": 28,
+"lines": [
+"ab été-bé"
+]
+},
+{
+"text": "10x- x2 g0(jfct0 a_edc-.b1)0",
+"chars": 10,
+"lines": [
+"10x- x2",
+"g0(jfct0 a",
+"_edc-.b1)0"
+]
+},
+{
+"text": ".\"3af1'éf,).x\"begtg\"éeba--d2étée-",
+"chars": 14,
+"lines": [
+".\"3af1'éf,).x\"",
+"begtg\"éeba--",
+"d2étée-"
+]
+},
+{
+"text": "f(Zaéhi.gad13 -0x-iéé",
+"chars": 8,
+"lines": [
+"f(Zaéhi.",
+"gad13",
+"-0x-iéé"
+]
+},
+{
+"text": "é-a'(b- tgcj-0,aZ\"éeef-.a",
+"chars": 14,
+"lines": [
+"é-a'(b- tgcj-",
+"0,aZ\"éeef-.a"
+]
+},
+{
+"text": "1i2ié j(..- -é2fédggcx,",
+"chars": 10,
+"lines": [
+"1i2ié",
+"j(..- -é2f",
+"édggcx,"
+]
+},
+{
+"text": "t,é3\"_ ei.2e'--be'é0.dc \"😀_if😀i0Z_icb2ü(cbe2e()",
+"chars": 10,
+"lines": [
+"t,é3\"_",
+"ei.2e'--",
+"be'é0.dc \"",
+"😀_if😀i0Z_i",
+"cb2ü(cbe2e",
+"()"
+]
+},
+{
+"text": "e0😀c",
+"chars": 10,
+"lines": [
+"e0😀c"
+]
+},
+{
+"text": "Züf2eéb3aééaeffh,éZé101f_xb(f2b.h33,a😀(j-_ Z03.)t,",
+"chars": 10,
+"lines": [
+"Züf2eéb3aé",
+"éaeffh,éZé",
+"101f_xb(f2",
+"b.h33,a😀(j",
+"-_ Z03.)t,"
+]
+},
+{
+"text": " --é.)-ii3üce' h02'-éé_3)0)ec'c'ü(bit1-b",
+"chars": 14,
+"lines": [
+" --é.)-ii3üce'",
+"h02'-",
+"éé_3)0)ec'c'ü(",
+"bit1-b"
+]
+},
+{
+"text": "jdh0g😀e--2, a2c",
+"chars": 10,
+"lines": [
+"jdh0g😀e--",
+"2, a2c"
+]
+},
+{
+"text": "'ü_x t.fééi01-",
+"chars": 8,
+"lines": [
+"'ü_x t.f",
+"ééi01-"
+]
+},
+{
+"text": "xZ1)-gh-.éf(),büxfc0Zé'3",
+"chars": 8,
+"lines": [
+"xZ1)-gh-",
+".éf(),bü",
+"xfc0Zé'3"
+]
+},
+{
+"text": "e c Zi2j__03f",
+"chars": 10,
+"lines": [
+"e c",
+"Zi2j__03f"
+]
+},
+{
+"text": "_\" _x,(é-(j_'3-éhxaébc_th3f ",
+"chars": 8,
+"lines": [
+"_\" _x,(é",
+"-(j_'3-",
+"éhxaébc_",
+"th3f"
+]
+},
+{
+"text": "1ét'.23iZ 2_)g-éb,ibc-j.a\")ü.3g3hx",
+"chars": 14,
+"lines": [
+"1ét'.23iZ 2_)g",
+"-éb,ibc-",
+"j.a\")ü.3g3hx"
+]
+},
+{
+"text": "-_ béé_ --_-i.ü ))---gi.if,ég éi-tbg-ü😀hxZx-e",
+"chars": 20,
+"lines": [
+"-_ béé_ --_-i.ü",
+"))---gi.if,ég éi-",
+"tbg-ü😀hxZx-e"
+]
+},
+{
+"text": "bcx2j-",
+"chars": 10,
+"lines": [
+"bcx2j-"
+]
+},
+{
+"text": "-  \"gdi",
+"chars": 20,
+"lines": [
+"-  \"gdi"
+]
+},
+{
+"text": "g)t1",
+"chars": 20,
+"lines": [
+"g)t1"
+]
+},
+{
+"text": "ü -😀ac- é1😀😀t- gxa)ft-xZ,'h tiZ😀",
+"chars": 20,
+"lines": [
+"ü -😀ac- é1😀😀t-",
+"gxa)ft-xZ,'h tiZ😀"
+]
+},
+{
+"text": " t- eZ(2gaüd.'(Z-t eéx3-htbhg.,0txd-éag,,'Zxé_g0",
+"chars": 8,
+"lines": [
+" t- eZ(2",
+"gaüd.'(Z",
+"-t eéx3-",
+"htbhg.,0",
+"txd-éag,",
+",'Zxé_g0"
+]
+},
+{
+"text": "cé é2 3d 3é\"_t(😀_\"2'\"\"ba.c ééd)td)e",
+"chars": 10,
+"lines": [
+"cé é2 3d 3",
+"é\"_t(😀_\"2'",
+"\"\"ba.c",
+"ééd)td)e"
+]
+},
+{
+"text": "2,.c_g1j.hdé1h-dü_jh😀0ié1,é",
+"chars": 14,
+"lines": [
+"2,.c_g1j.hdé1h",
+"-dü_jh😀0ié1,é"
+]
+},
+{
+"text": "_i\"i.2hx(xü''-'.-.x-cda', bcg.'ef .😀22ü-ZZ3ieh0-0",
+"chars": 20,
+"lines": [
+"_i\"i.2hx(xü''-'.-.x-",
+"cda', bcg.'ef",
+".😀22ü-ZZ3ieh0-0"
+]
+},
+{
+"text": ",éj😀j)\"  😀g1)ff 31(ae(-f(3)\"j.ü)😀h)0'0_(1).t_.f",
+"chars": 14,
+"lines": [
+",éj😀j)\"",
+"😀g1)ff 31(ae(-",
+"f(3)\"j.ü)😀h)0'",
+"0_(1).t_.f"
+]
+},
+{
+"text": "b😀té-😀éj  f1\"b._d \"b e(",
+"chars": 8,
+"lines": [
+"b😀té-😀éj",
+"f1\"b._d",
+"\"b e("
+]
+},
+{
+"text": "f'g)fbjg ..3_Z1tüZZi3",
+"chars": 20,
+"lines": [
+"f'g)fbjg",
+"..3_Z1tüZZi3"
+]
+},
+{
+"text": "ecéüaéf1b_😀ahééj. é )-é _\"'d2(h(j ",
+"chars": 8,
+"lines": [
+"ecéüaéf1",
+"b_😀ahééj",
+". é )-é ",
+"_\"'d2(h(",
+"j"
+]
+},
+{
+"text": "1b2c)g- ü-.2x.0 't (2,3tZf2.td-ié__'d.a2😀0.é é )",
+"chars": 10,
+"lines": [
+"1b2c)g-",
+"ü-.2x.0 't",
+"(2,3tZf2.t",
+"d-ié__'d.a",
+"2😀0.é é )"
+]
+},
+{
+"text": "_i'_dj a-jifü'_g",
+"chars": 20,
+"lines": [
+"_i'_dj a-jifü'_g"
+]
+},
+{
+"text": "1fx(b-é-f0-cé_3 ()(te(1e😀eigt1h0aé2.\"h1a-j\"é",
+"chars": 14,
+"lines": [
+"1fx(b-é-f0-",
+"cé_3 ()(te(1e😀",
+"eigt1h0aé2.\"h1",
+"a-j\"é"
+]
+},
+{
+"text": "tf,--éhZ('2Z0éfgjgi  ",
+"chars": 10,
+"lines": [
+"tf,--éhZ('",
+"2Z0éfgjgi"
+]
+},
+{
+"text": "c1fg.c h éeZ xi-jé2Zéat).",
+"chars": 8,
+"lines": [
+"c1fg.c h",
+"éeZ xi-j",
+"é2Zéat)."
+]
+},
+{
+"text": "Z-Z(0gé-xZ\"g ,(.",
+"chars": 14,
+"lines": [
+"Z-Z(0gé-xZ\"g",
+",(."
+]
+},
+{
+"text": "xxj-_-b-fi.2éZZf😀'1h0i.e, Zjha\"😀.😀  e1c",
+"chars": 20,
+"lines": [
+"xxj-_-b-",
+"fi.2éZZf😀'1h0i.e,",
+"Zjha\"😀.😀  e1c"
+]
+},
+{
+"text": "i(éb -é1cj_",
+"chars": 20,
+"lines": [
+"i(éb -é1cj_"
+]
+},
+{
+"text": "t Z_i,.",
+"chars": 14,
+"lines": [
+"t Z_i,."
+]
+},
+{
+"text": "cjt",
+"chars": 20,
+"lines": [
+"cjt"
+]
+},
+{
+"text": "g2üéé\"31é hh_Z__ éb)d\" é)(e.h0.xtd2g_.",
+"chars": 14,
+"lines": [
+"g2üéé\"31é",
+"hh_Z__ éb)d\" é",
+")(e.h0.xtd2g_."
+]
+},
+{
+"text": "t.e😀é .éheg_ih1a\".(b) e00_tjü.c(b1)()3j2--",
+"chars": 14,
+"lines": [
+"t.e😀é .éheg_ih",
+"1a\".(b) e00_tj",
+"ü.c(b1)()3j2--"
+]
+},
+{
+"text": "d-)ü2b -.-dg()'éiZ0éf .(h-' .x\"'😀_h_.( .'if1",
+"chars": 8,
+"lines": [
+"d-)ü2b -",
+".-",
+"dg()'éiZ",
+"0éf",
+".(h-' .x",
+"\"'😀_h_.(",
+".'if1"
+]
+},
+{
+"text": "_e_ca\", f \"-. 'b jc1éa3d e😀)",
+"chars": 20,
+"lines": [
+"_e_ca\", f \"-. 'b",
+"jc1éa3d e😀)"
+]
+},
+{
+"text": "c_\"x_  h .0,.,3.3,c-d0 )jb3 x0,beh .jd( c)_,3fx é,",
+"chars": 10,
+"lines": [
+"c_\"x_  h .",
+"0,.,3.3,c-",
+"d0 )jb3",
+"x0,beh",
+".jd(",
+"c)_,3fx é,"
+]
+},
+{
+"text": "31d)é1😀-ci",
+"chars": 20,
+"lines": [
+"31d)é1😀-ci"
+]
+},
+{
+"text": "ij1_ca.é_jft(2 ec.\",h.é1f.😀(Z-c tdZ 1t-ééd-éü.  ",
+"chars": 20,
+"lines": [
+"ij1_ca.é_jft(2",
+"ec.\",h.é1f.😀(Z-c tdZ",
+"1t-ééd-éü."
+]
+},
+{
+"text": "t-1(203 3-éée",
+"chars": 8,
+"lines": [
+"t-1(203",
+"3-éée"
+]
+},
+{
+"text": "'😀'b_ ,xt-'g😀dj😀i.hb)é0fé),_d(t.3c-jxic-(é 2",
+"chars": 10,
+"lines": [
+"'😀'b_ ,xt-",
+"'g😀dj😀i.hb",
+")é0fé),_d(",
+"t.3c-jxic-",
+"(é 2"
+]
+},
+{
+"text": ",)0éj-'0tié_ü.g\"😀ü-icb2a(e-üh😀.,f",
+"chars": 20,
+"lines": [
+",)0éj-'0tié_ü.g\"😀ü-",
+"icb2a(e-üh😀.,f"
+]
+},
+{
+"text": "t3d3éZ\"",
+"chars": 20,
+"lines": [
+"t3d3éZ\""
+]
+},
+{
+"text": "'. t-2 ü._fZ j2,(bth😀et'dé3(2),ebcü)😀(, 2éZ😀b",
+"chars": 10,
+"lines": [
+"'. t-2",
+"ü._fZ j2,(",
+"bth😀et'dé3",
+"(2),ebcü)😀",
+"(, 2éZ😀b"
+]
+},
+{
+"text": "edéée'e10éécix'(3😀2bj-'.,.._ata.3fZ,ügb)-t -  Z3\"",
+"chars": 14,
+"lines": [
+"edéée'e10éécix",
+"'(3😀2bj-",
+"'.,.._ata.3fZ,",
+"ügb)-t -  Z3\""
+]
+},
+{
+"text": "\"😀3..😀) xieeg(h0x2c é2dü,t",
+"chars": 20,
+"lines": [
+"\"😀3..😀) xieeg(h0x2c",
+"é2dü,t"
+]
+},
+{
+"text": ",😀) Z-iéi' i-é\".",
+"chars": 10,
+"lines": [
+",😀) Z-iéi'",
+"i-é\"."
+]
+},
+{
+"text": "",
+"chars": 20,
+"lines": [
+""
+]
+},
+{
+"text": "i''é,téid hc-\"ühtZb2 😀e(0\".téjé-\"j0 g",
+"chars": 14,
+"lines": [
+"i''é,téid",
+"hc-\"ühtZb2",
+"😀e(0\".téjé-\"j0",
+"g"
+]
+},
+{
+"text": " hj)b'j't').f2-😀,djea(fa Z2i-é2",
+"chars": 8,
+"lines": [
+" hj)b'j'",
+"t').f2-",
+"😀,djea(f",
+"a Z2i-é2"
+]
+},
+{
+"text": "ütd-,'-\".0d b he'üb(ex1a-e",
+"chars": 14,
+"lines": [
+"ütd-,'-\".0d b",
+"he'üb(ex1a-e"
+]
+},
+{
+"text": "",
+"chars": 14,
+"lines": [
+""
+]
+},
+{
+"text": "3t(g2té,baj.)é😀",
+"chars": 14,
+"lines": [
+"3t(g2té,baj.)é",
+"😀"
+]
+},
+{
+"text": "0ü('e)g,Z- -di(- ügjj😀ü",
+"chars": 10,
+"lines": [
+"0ü('e)g,Z-",
+"-di(-",
+"ügjj😀ü"
+]
+}
+]

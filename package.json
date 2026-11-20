@@ -1,0 +1,40 @@
+{
+  "name": "mermaid-contour",
+  "version": "0.1.0",
+  "description": "Contour diagrams (the six standard views of the Landscape notation) as an external Mermaid diagram type",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./src/mermaid-contour.mjs",
+  "exports": {
+    ".": "./src/mermaid-contour.mjs"
+  },
+  "bin": {
+    "contour-render": "./bin/contour-render.mjs"
+  },
+  "files": [
+    "src",
+    "bin",
+    "examples",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test test/contour.test.mjs",
+    "test:browser": "node --test test/browser.test.mjs",
+    "render": "node bin/contour-render.mjs"
+  },
+  "peerDependencies": {
+    "mermaid": ">=10.7.0"
+  },
+  "devDependencies": {
+    "mermaid": "11.12.0",
+    "puppeteer": "^24.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gunnarnordqvist/Mermaid-contour.git"
+  }
+}

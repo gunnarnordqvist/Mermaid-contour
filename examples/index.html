@@ -1,0 +1,24 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mermaid-contour</title>
+<body style="margin:16px;background:#F8FAFF;font-family:Inter,system-ui,sans-serif">
+<p>A hand-written view (V1) and a flowchart, rendered by Mermaid with the <code>contour</code> diagram type.</p>
+<pre class="mermaid">
+contour
+  title Two units
+  footer Illustrative
+  unit A-1 "Staff assistant" level=1 rev=R1 reach=L mode=1 policy=enforced tier=T2 evidence=attested
+  unit A-2 "Code agent" level=3 rev=R2 reach=M mode=5 identity=own policy=enforced tier=T3 evidence=automatic
+</pre>
+<pre class="mermaid">
+flowchart LR
+  A[Model] --> B[Other diagrams still work]
+</pre>
+<script type="module">
+  import mermaid from '../node_modules/mermaid/dist/mermaid.esm.min.mjs';
+  import { registerContour } from '../src/mermaid-contour.mjs';
+  await registerContour(mermaid);          // before the first render
+  mermaid.initialize({ startOnLoad: false });
+  await mermaid.run({ querySelector: '.mermaid' });
+</script>

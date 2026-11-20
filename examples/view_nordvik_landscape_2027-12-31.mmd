@@ -1,0 +1,30 @@
+contour
+  view landscape
+  title Nordvik Region · V1 The one-page landscape · 2027-12-31
+  subtitle public authority, EU · End of the year · 13 units drawn
+  footer Illustrative: fictional organisations · Rendered by scripts/render_landscape.py from landscape/models/nordvik_region.yaml · Contour notation, docs/NOTATION.md
+  footer Shaded cell: the empty corner (Level 4 Autonomous at R4 Irreversible). Red outline: Level 3 Bounded without an enforced policy point.
+  panel "Nordvik Region"
+    unit NR-AMB "Ambient AI in licensed software" level=4 rev=R2 reach=L mode=0 identity=own policy=planned tier=T2 evidence=attested kinds=attestations hosting=non-eu-supplier operated_by=supplier suppliers=saas-vendors
+    unit NR-AWT "Agentic work tools (platform team)" level=1 rev=R2 reach=S mode=3 identity=person policy=enforced tier=T2 evidence=automatic kinds=logs,gates hosting=eea-supplier operated_by=self suppliers=nordic-hosting
+      action "edit files" 1
+      action "run commands" 1
+      action "research" 0
+      action "commit or push" 0
+    unit NR-BT "Benefits-triage system" level=0 rev=R3 reach=XL mode=4 identity=own policy=enforced tier=T2 evidence=automatic kinds=logs,tests,gates,attestations hosting=own-premises operated_by=self suppliers=triagesoft
+      action "rank the queue" 0
+    unit NR-CA "Conversational assistants (approved enterprise tool)" level=1 rev=R1 reach=L mode=1 identity=person policy=enforced tier=T3 evidence=attested kinds=attestations hosting=non-eu-supplier operated_by=supplier suppliers=assistant-vendor
+    unit NR-CN "Case-note summariser" level=1 rev=R2 reach=M mode=4 identity=person policy=enforced tier=T2 evidence=automatic kinds=logs,tests hosting=own-premises operated_by=self
+    unit NR-CR "Correspondence classifier" level=3 rev=R1 reach=L mode=4 identity=own policy=enforced tier=T2 evidence=automatic kinds=logs,tests hosting=own-premises operated_by=self
+    unit NR-CS "Citizen-service assistant" level=4 rev=R2 reach=XL mode=4 identity=own policy=enforced tier=T2 evidence=automatic kinds=logs,tests,gates hosting=eea-supplier operated_by=self suppliers=nordic-hosting
+      action "answer a resident" 4
+      action "escalate to a person" 3
+    unit NR-EWA "Embedded workplace assistant (pilot)" level=1 rev=R1 reach=M mode=2 identity=person policy=enforced tier=T2 evidence=attested status=pilot kinds=logs,attestations hosting=non-eu-supplier operated_by=supplier suppliers=workplace-vendor
+    unit NR-EXP "Exposure prioritisation" level=0 rev=R1 reach=S mode=4 identity=own policy=enforced tier=T2 evidence=attested kinds=attestations hosting=own-premises operated_by=self
+    unit NR-SA "Internal staff assistant" level=1 rev=R1 reach=L mode=4 identity=person policy=enforced tier=T2 evidence=automatic kinds=logs,tests,gates hosting=eu-supplier operated_by=self suppliers=eu-cloud
+    unit NR-SOC "SOC triage assistant" level=1 rev=R1 reach=S mode=4 identity=own policy=enforced tier=T2 evidence=automatic kinds=logs,tests hosting=eea-supplier operated_by=self suppliers=nordic-hosting,mssp
+    unit NR-SW "Rostering and shift allocation" level=3 rev=R2 reach=L mode=4 identity=own policy=enforced tier=T3 evidence=automatic kinds=logs,gates,attestations hosting=eu-supplier operated_by=supplier suppliers=shiftwise
+      action "draft a roster" 2
+      action "offer an open shift" 3
+      action "flag a rest-rule breach" 1
+    unit NR-TL "Recruitment screening pilot" level=1 rev=R3 reach=M mode=4 identity=own policy=planned tier=T3 evidence=attested status=retired kinds=attestations hosting=non-eu-supplier operated_by=supplier suppliers=talentlens
