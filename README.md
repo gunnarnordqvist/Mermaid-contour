@@ -118,13 +118,28 @@ git push --follow-tags
 ```
 
 One-time setup, by the owner of the npm package. npm configures a trusted publisher on an existing package, so the first
-version is published by hand:
+version is published separately, either of these two ways:
 
-1. `npm login`, then `npm publish` from a clone (npm asks for your two-factor code).
-2. On npmjs.com open the package, *Settings, Trusted publishing*, choose GitHub Actions and enter the user `gunnarnordqvist`, the
+**On a computer:** `npm login`, then `npm publish` from a clone (npm asks for your two-factor code). No token is created.
+
+**Without a computer** (only web pages): `.github/workflows/publish-first.yml` publishes the first version with a short-lived token.
+
+1. On npmjs.com, *Access Tokens, Generate New Token, Granular Access Token*: any name, expiration **one day**, permission
+   *Read and write*, packages *All packages* (the package does not exist yet), and allow it to publish without a one-time code
+   (CI cannot type one). Copy the token.
+2. On GitHub, in this repository, *Settings, Secrets and variables, Actions, New repository secret*: name `NPM_TOKEN`, value the token.
+3. *Actions, publish-first, Run workflow*. When it is green, the package is on npm.
+4. At once: delete the secret `NPM_TOKEN` on GitHub, and revoke the token on npmjs.com (it expires after a day anyway).
+
+Then, on either route:
+
+5. On npmjs.com open the package, *Settings, Trusted publishing*, choose GitHub Actions and enter the user `gunnarnordqvist`, the
    repository `Mermaid-contour` and the workflow filename `publish.yml` (all case-sensitive).
-3. Publish the next version by tag, as above, within two days: npm requires a new trusted publisher to complete its first publish in that time.
-4. Then, under *Settings, Publishing access*, choose "Require two-factor authentication and disallow tokens".
+6. Publish the next version by tag within two days (npm requires a new trusted publisher to complete its first publish in that time).
+   Without a computer: on GitHub open `package.json`, edit `version` to `0.1.1`, commit; then *Releases, Draft a new release*, create the
+   tag `v0.1.1` and publish the release. The tag starts `publish.yml`.
+7. Delete `.github/workflows/publish-first.yml`, and under *Settings, Publishing access* on npmjs.com choose
+   "Require two-factor authentication and disallow tokens".
 
 ## Licence
 
