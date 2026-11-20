@@ -1,0 +1,534 @@
+From 2a1ce22ecaa63f9a7dae7d1fde91521968a1b4d3 Mon Sep 17 00:00:00 2001
+From: claude <noreply@anthropic.com>
+Date: Fri, 20 Nov 2026 22:59:09 +0000
+Subject: [PATCH 6/9] contour-beta: docs, examples, e2e inputs, changeset and
+ registrations
+
+---
+ .changeset/add-contour-beta-diagram.md        |   6 +
+ .fallowrc.json                                |   1 +
+ .github/triage-labels.json                    |   1 +
+ ...hould-render-a-contour-comparison-view.mmd |  13 ++
+ ...should-render-a-contour-decisions-view.mmd |  15 ++
+ .../should-render-a-contour-evidence-view.mmd |  13 ++
+ ...nder-a-contour-landscape-with-absences.mmd |  14 ++
+ .../should-render-a-contour-supply-view.mmd   |  16 ++
+ .../should-render-a-contour-year-view.mmd     |  16 ++
+ ...ould-render-a-simple-contour-landscape.mmd |  12 +
+ e2e/sheet-order.json                          |   9 +
+ packages/examples/src/examples/contour.ts     |  20 ++
+ packages/examples/src/index.ts                |   2 +
+ .../mermaid/src/docs/.vitepress/config.ts     |   1 +
+ packages/mermaid/src/docs/syntax/contour.md   | 206 ++++++++++++++++++
+ packages/mermaid/src/mermaidAPI.spec.ts       |   5 +
+ .../multi-diagram-id-uniqueness.spec.ts       |   3 +
+ 17 files changed, 353 insertions(+)
+ create mode 100644 .changeset/add-contour-beta-diagram.md
+ create mode 100644 e2e/diagrams/contour/pr-check/should-render-a-contour-comparison-view.mmd
+ create mode 100644 e2e/diagrams/contour/pr-check/should-render-a-contour-decisions-view.mmd
+ create mode 100644 e2e/diagrams/contour/pr-check/should-render-a-contour-evidence-view.mmd
+ create mode 100644 e2e/diagrams/contour/pr-check/should-render-a-contour-landscape-with-absences.mmd
+ create mode 100644 e2e/diagrams/contour/pr-check/should-render-a-contour-supply-view.mmd
+ create mode 100644 e2e/diagrams/contour/pr-check/should-render-a-contour-year-view.mmd
+ create mode 100644 e2e/diagrams/contour/pr-check/should-render-a-simple-contour-landscape.mmd
+ create mode 100644 packages/examples/src/examples/contour.ts
+ create mode 100644 packages/mermaid/src/docs/syntax/contour.md
+
+diff --git a/.changeset/add-contour-beta-diagram.md b/.changeset/add-contour-beta-diagram.md
+new file mode 100644
+index 0000000..02727a1
+--- /dev/null
++++ b/.changeset/add-contour-beta-diagram.md
+@@ -0,0 +1,6 @@
++---
++'mermaid': minor
++'@mermaid-js/parser': minor
++---
++
++feat: Add the `contour-beta` diagram, which draws every AI use of an organisation as one mark with seven dimensions (autonomy, reversibility, reach, usage mode, identity, control and evidence) in six standard views
+diff --git a/.fallowrc.json b/.fallowrc.json
+index 5649028..288694c 100644
+--- a/.fallowrc.json
++++ b/.fallowrc.json
+@@ -34,6 +34,7 @@
+     "packages/mermaid/src/diagrams/architecture/**",
+     "packages/mermaid/src/diagrams/c4/**",
+     "packages/mermaid/src/diagrams/class/**",
++    "packages/mermaid/src/diagrams/contour/**",
+     "packages/mermaid/src/diagrams/common/**",
+     "packages/mermaid/src/diagrams/cynefin/**",
+     "packages/mermaid/src/diagrams/er/**",
+diff --git a/.github/triage-labels.json b/.github/triage-labels.json
+index 90e805e..3a5defb 100644
+--- a/.github/triage-labels.json
++++ b/.github/triage-labels.json
+@@ -9,6 +9,7 @@
+       "keywords": ["C4Context", "C4Container", "C4Component", "C4Dynamic", "C4Deployment"]
+     },
+     "class": { "label": "Graph: Class", "keywords": ["classDiagram"] },
++    "contour": { "label": "Graph: Contour", "keywords": ["contour"] },
+     "cynefin": { "label": "Graph: Cynefin", "keywords": ["cynefin"] },
+     "er": { "label": "Graph: Entity Relationship", "keywords": ["erDiagram"] },
+     "eventmodeling": { "label": "Graph: EventModeling", "keywords": ["eventmodeling"] },
+diff --git a/e2e/diagrams/contour/pr-check/should-render-a-contour-comparison-view.mmd b/e2e/diagrams/contour/pr-check/should-render-a-contour-comparison-view.mmd
+new file mode 100644
+index 0000000..6050345
+--- /dev/null
++++ b/e2e/diagrams/contour/pr-check/should-render-a-contour-comparison-view.mmd
+@@ -0,0 +1,13 @@
++---
++description: >-
++  Contour-beta comparison view (V6): two panels, two organisations, drawn side
++  by side at identical scales (two panels without a view statement imply compare).
++---
++contour-beta
++  title Two organisations
++  panel "Regional council"
++    unit A "Case summaries" level=0 rev=R1 reach=M mode=2
++    unit B "Benefit triage" level=2 rev=R3 reach=XL mode=4 identity=own policy=enforced tier=T2 evidence=automatic
++  panel "Mutual insurer"
++    unit C "Claims triage" level=1 rev=R2 reach=XL mode=4 identity=own policy=enforced tier=T2 evidence=automatic
++    unit D "Quote engine" level=3 rev=R3 reach=XL mode=5 identity=own policy=planned tier=T3 evidence=attested
+diff --git a/e2e/diagrams/contour/pr-check/should-render-a-contour-decisions-view.mmd b/e2e/diagrams/contour/pr-check/should-render-a-contour-decisions-view.mmd
+new file mode 100644
+index 0000000..0446b1f
+--- /dev/null
++++ b/e2e/diagrams/contour/pr-check/should-render-a-contour-decisions-view.mmd
+@@ -0,0 +1,15 @@
++---
++description: >-
++  Contour-beta decision-rights view (V4): one row per unit, with a bar to the
++  unit's ceiling, a thin bar per action class, the decision seat and the policy
++  point.
++---
++contour-beta
++  view decisions
++  title Who decides what
++  panel "Regional council"
++    unit B "Benefit triage" level=2 rev=R3 reach=XL mode=4 identity=own policy=enforced tier=T2
++      action "rank the queue" 0
++      action "flag a case" 1
++      action "request a document" 2
++    unit A "Case summaries" level=0 rev=R1 reach=M mode=2 tier=T1
+diff --git a/e2e/diagrams/contour/pr-check/should-render-a-contour-evidence-view.mmd b/e2e/diagrams/contour/pr-check/should-render-a-contour-evidence-view.mmd
+new file mode 100644
+index 0000000..04ee3ec
+--- /dev/null
++++ b/e2e/diagrams/contour/pr-check/should-render-a-contour-evidence-view.mmd
+@@ -0,0 +1,13 @@
++---
++description: >-
++  Contour-beta evidence view (V5): one row per unit, with a column per kind of
++  evidence; automatic kinds are filled, attestations hatched, and a unit without
++  evidence is marked in the none column.
++---
++contour-beta
++  view evidence
++  title Where the proof comes from
++  panel "Regional council"
++    unit B "Benefit triage" level=2 rev=R3 reach=XL mode=4 identity=own policy=enforced tier=T2 evidence=automatic kinds=logs,tests,gates
++    unit C "Roster routing" level=3 rev=R2 reach=L mode=5 identity=own evidence=attested kinds=attestations
++    unit A "Case summaries" level=0 rev=R1 reach=M mode=2
+diff --git a/e2e/diagrams/contour/pr-check/should-render-a-contour-landscape-with-absences.mmd b/e2e/diagrams/contour/pr-check/should-render-a-contour-landscape-with-absences.mmd
+new file mode 100644
+index 0000000..dc87799
+--- /dev/null
++++ b/e2e/diagrams/contour/pr-check/should-render-a-contour-landscape-with-absences.mmd
+@@ -0,0 +1,14 @@
++---
++description: >-
++  Contour-beta landscape without panels and without optional attributes, with a
++  subtitle and a footer: every omitted attribute is drawn as an absence (no
++  policy point, no seat, no baseline).
++---
++contour-beta
++  view landscape
++  title Units with absences
++  subtitle "Only the four required attributes are given"
++  footer "Illustrative"
++  unit A "Ambient autocomplete" level=1 rev=R1 reach=XL mode=0
++  unit B "Paused pilot" level=3 rev=R3 reach=S mode=3 status=paused
++  unit C "Retired assistant" level=0 rev=R2 reach=M mode=1 status=retired
+diff --git a/e2e/diagrams/contour/pr-check/should-render-a-contour-supply-view.mmd b/e2e/diagrams/contour/pr-check/should-render-a-contour-supply-view.mmd
+new file mode 100644
+index 0000000..ac87e26
+--- /dev/null
++++ b/e2e/diagrams/contour/pr-check/should-render-a-contour-supply-view.mmd
+@@ -0,0 +1,16 @@
++---
++description: >-
++  Contour-beta supply and sovereignty view (V3): suppliers by role and
++  jurisdiction, and units placed by hosting, operator and the suppliers they
++  rely on.
++---
++contour-beta
++  view supply
++  title Who supplies what
++  panel "Regional council"
++    unit A "Case summaries" level=0 rev=R1 reach=M mode=2 hosting=eu-supplier operated_by=supplier suppliers=m1,h1
++    unit B "Benefit triage" level=2 rev=R3 reach=XL mode=4 identity=own hosting=own-premises suppliers=m1
++    unit C "Meeting notes" level=1 rev=R1 reach=L mode=1 hosting=non-eu-supplier operated_by=supplier suppliers=m2
++  supplier m1 "Model provider" "Sweden" role=model jurisdiction=EU
++  supplier h1 "Cloud region" "Finland" role=hosting jurisdiction=EU
++  supplier m2 "Model provider" "United States" role=model jurisdiction=non-EU
+diff --git a/e2e/diagrams/contour/pr-check/should-render-a-contour-year-view.mmd b/e2e/diagrams/contour/pr-check/should-render-a-contour-year-view.mmd
+new file mode 100644
+index 0000000..6579cac
+--- /dev/null
++++ b/e2e/diagrams/contour/pr-check/should-render-a-contour-year-view.mmd
+@@ -0,0 +1,16 @@
++---
++description: >-
++  Contour-beta year view (V2): two panels, the start and the end of the period;
++  a unit that changes cell gets a trail, a unit only in the second panel is new.
++---
++contour-beta
++  view year
++  title A year of change
++  subtitle "2026-01-01 to 2027-01-01"
++  panel "2026-01-01"
++    unit A "Case summaries" level=0 rev=R1 reach=M mode=2
++    unit B "Benefit triage" level=1 rev=R2 reach=L mode=4 identity=own
++  panel "2027-01-01"
++    unit A "Case summaries" level=1 rev=R1 reach=L mode=2
++    unit B "Benefit triage" level=2 rev=R3 reach=XL mode=4 identity=own policy=enforced tier=T2 evidence=automatic
++    unit C "Roster routing" level=3 rev=R2 reach=M mode=5 identity=own policy=planned tier=T1
+diff --git a/e2e/diagrams/contour/pr-check/should-render-a-simple-contour-landscape.mmd b/e2e/diagrams/contour/pr-check/should-render-a-simple-contour-landscape.mmd
+new file mode 100644
+index 0000000..d7480d7
+--- /dev/null
++++ b/e2e/diagrams/contour/pr-check/should-render-a-simple-contour-landscape.mmd
+@@ -0,0 +1,12 @@
++---
++description: >-
++  Minimal contour-beta diagram in the default view (V1, the one-page landscape):
++  three units with the four required attributes, one with a policy point, a
++  decision seat and automatic evidence.
++---
++contour-beta
++  title Three AI uses
++  panel "Regional council"
++    unit AS "Case summaries" level=0 rev=R1 reach=M mode=2
++    unit BT "Benefit triage" level=2 rev=R3 reach=XL mode=4 identity=own policy=enforced tier=T2 evidence=automatic
++    unit RT "Roster routing" level=3 rev=R2 reach=L mode=5 identity=own policy=planned tier=T1 evidence=attested
+diff --git a/e2e/sheet-order.json b/e2e/sheet-order.json
+index 0770c3d..6bd92e0 100644
+--- a/e2e/sheet-order.json
++++ b/e2e/sheet-order.json
+@@ -342,6 +342,15 @@
+     "settings-from-initialize-nodes-should-be-green.png",
+     "should-render-if-values-are-not-quoted-properly.png"
+   ],
++  "diagrams/contour": [
++    "should-render-a-contour-comparison-view.png",
++    "should-render-a-contour-decisions-view.png",
++    "should-render-a-contour-evidence-view.png",
++    "should-render-a-contour-landscape-with-absences.png",
++    "should-render-a-contour-supply-view.png",
++    "should-render-a-contour-year-view.png",
++    "should-render-a-simple-contour-landscape.png"
++  ],
+   "diagrams/current": [
+     "should-render-a-state-with-states-in-it.png"
+   ],
+diff --git a/packages/examples/src/examples/contour.ts b/packages/examples/src/examples/contour.ts
+new file mode 100644
+index 0000000..4e48ff6
+--- /dev/null
++++ b/packages/examples/src/examples/contour.ts
+@@ -0,0 +1,20 @@
++import type { DiagramMetadata } from '../types.js';
++
++export default {
++  id: 'contour',
++  name: 'Contour Diagram',
++  description: 'Draw every AI use of an organisation as one mark with seven dimensions',
++  examples: [
++    {
++      title: 'One-page landscape',
++      isDefault: true,
++      code: `contour-beta
++  title Three AI uses
++  subtitle "Illustrative"
++  panel "Regional council"
++    unit AS "Case summaries" level=0 rev=R1 reach=M mode=2
++    unit BT "Benefit triage" level=2 rev=R3 reach=XL mode=4 identity=own policy=enforced tier=T2 evidence=automatic
++    unit RT "Roster routing" level=3 rev=R2 reach=L mode=5 identity=own policy=planned tier=T1 evidence=attested`,
++    },
++  ],
++} satisfies DiagramMetadata;
+diff --git a/packages/examples/src/index.ts b/packages/examples/src/index.ts
+index 60f8853..8a5cbdf 100644
+--- a/packages/examples/src/index.ts
++++ b/packages/examples/src/index.ts
+@@ -32,6 +32,7 @@ import railroadDiagram from './examples/railroad.js';
+ import railroadEbnfDiagram from './examples/railroad-ebnf.js';
+ import railroadAbnfDiagram from './examples/railroad-abnf.js';
+ import railroadPegDiagram from './examples/railroad-peg.js';
++import contourDiagram from './examples/contour.js';
+ 
+ export const diagramData: DiagramMetadata[] = [
+   flowChart,
+@@ -67,4 +68,5 @@ export const diagramData: DiagramMetadata[] = [
+   railroadEbnfDiagram,
+   railroadAbnfDiagram,
+   railroadPegDiagram,
++  contourDiagram,
+ ];
+diff --git a/packages/mermaid/src/docs/.vitepress/config.ts b/packages/mermaid/src/docs/.vitepress/config.ts
+index f11eeef..d51271e 100644
+--- a/packages/mermaid/src/docs/.vitepress/config.ts
++++ b/packages/mermaid/src/docs/.vitepress/config.ts
+@@ -199,6 +199,7 @@ function sidebarSyntax() {
+         syntaxItem('Ishikawa', 'ishikawa'),
+         syntaxItem('Wardley', 'wardley'),
+         syntaxItem('Cynefin', 'cynefin'),
++        syntaxItem('Contour', 'contour'),
+         syntaxItem('TreeView', 'treeView'),
+         // Agentflow is deliberately not listed while it is beta. The page at
+         // `/syntax/agentflow` still builds and is reachable by URL; it is just
+diff --git a/packages/mermaid/src/docs/syntax/contour.md b/packages/mermaid/src/docs/syntax/contour.md
+new file mode 100644
+index 0000000..061be2f
+--- /dev/null
++++ b/packages/mermaid/src/docs/syntax/contour.md
+@@ -0,0 +1,206 @@
++---
++description: 'Draw every AI use of an organisation as one mark with seven dimensions, in six standard views, with the contour-beta diagram.'
++---
++
++<!-- cspell:ignore Nordqvist -->
++
++# Contour Diagram (beta)
++
++> **Warning**
++> Contour is a beta diagram. Its syntax is introduced with the `contour-beta` keyword and may change before it is declared stable.
++
++## Introduction
++
++Contour is a notation for the landscape that emerges in an organisation when AI tools go to work. It draws every AI use, called a **unit**, as one **mark** with seven dimensions, so that a whole organisation fits on one page and two organisations can be compared at identical scales. The diagram is written as text, one `unit` line per AI use, and drawn the same way every time.
++
++Contour was designed for the book _Landscape: A Fact-Based Picture of Architecture and AI at Work_ by Gunnar Nordqvist. The notation is specified in that book; this page documents only the diagram type.
++
++## The seven dimensions
++
++| Dimension     | Drawn as                                            | Attribute and values                                                                                                                                                                                                                                                                   |
++| ------------- | --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
++| Autonomy      | Column                                              | `level=0` to `level=4`: Level 0 Advisory, Level 1 Assisted, Level 2 Supervised, Level 3 Bounded, Level 4 Autonomous                                                                                                                                                                    |
++| Reversibility | Row                                                 | `rev=R1` to `rev=R4`: R1 Reversible at once, R2 Reversible with effort, R3 Hard to reverse, R4 Irreversible                                                                                                                                                                            |
++| Reach         | Size                                                | `reach=S`, `M`, `L`, `XL`: the number of people the unit's actions touch in a year (S under 100, M 100 to 999, L 1,000 to 9,999, XL 10,000 and more)                                                                                                                                   |
++| Usage mode    | Colour, with the mode number in the mark            | `mode=0` to `mode=5`: Ambient AI, Conversational assistants, Embedded workplace assistants, Agentic work tools, Built AI applications, Autonomous production agents                                                                                                                    |
++| Identity      | Shape                                               | `identity=person` (circle: acts with a person's identity) or `identity=own` (rounded square: acts with an identity of its own)                                                                                                                                                         |
++| Control       | A diamond (policy point) and a seat carrying a tier | `policy=enforced` (filled diamond), `planned` (hollow diamond) or `none`; `tier=T1` to `T4` for the person who holds the decision right (T1 operator or user, T2 system owner or architect, T3 executive, T4 board or elected body); `T0` means nobody is named and the seat is absent |
++| Evidence      | A baseline under the mark                           | `evidence=automatic` (solid: produced by the system), `attested` (dashed: declared by a person or a supplier) or `none` (no line)                                                                                                                                                      |
++
++Autonomy, reversibility, reach and usage mode are required for every unit. The three others (identity, control and evidence) are optional.
++
++## Syntax
++
++```
++contour-beta
++  view landscape
++  title Text
++  subtitle "Text"
++  footer "Text"
++  panel "Name"
++    unit ID "Name" level=0 rev=R1 reach=S mode=0
++      action "name" 0
++  supplier ID "Label" "Location" role=model jurisdiction=EU
++```
++
++The keyword is `contour-beta`. Indentation is free. A diagram draws exactly one view.
++
++### Statements
++
++| Statement                                    | Meaning                                                                                                                                                                                       |
++| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
++| `view <name>`                                | The view to draw: `landscape`, `year`, `supply`, `decisions`, `evidence` or `compare`. Optional: one panel implies `landscape`, two panels imply `compare`.                                   |
++| `title <text>`                               | The title (the common Mermaid title statement; a front-matter `title` also works). `accTitle` and `accDescr` are supported as in other diagrams.                                              |
++| `subtitle "text"`                            | A line under the title. The text is a quoted string.                                                                                                                                          |
++| `footer "text"`                              | A line at the foot of the diagram, for example a source or the word "Illustrative". Repeat the statement for more lines.                                                                      |
++| `panel "Name"`                               | A group of units, normally one organisation. A diagram has at most two panels. Panels may be left out, in which case every unit belongs to one unnamed panel; the two styles cannot be mixed. |
++| `unit ID "Name" key=value ...`               | One AI use. `ID` is a word or a number and must be unique within the diagram (see the year view for the one exception).                                                                       |
++| `action "name" N`                            | An action class of the unit above it, with its autonomy level `N` (0 to 4). Used by the decisions view.                                                                                       |
++| `supplier ID "Label" ["Location"] key=value` | A supplier, with an optional location. Used by the supply view.                                                                                                                               |
++
++### Unit attributes
++
++| Attribute     | Values                                                                      | If omitted          |
++| ------------- | --------------------------------------------------------------------------- | ------------------- |
++| `level`       | `0` to `4`                                                                  | Required            |
++| `rev`         | `R1`, `R2`, `R3`, `R4`                                                      | Required            |
++| `reach`       | `S`, `M`, `L`, `XL`                                                         | Required            |
++| `mode`        | `0` to `5`                                                                  | Required            |
++| `identity`    | `person`, `own`                                                             | `person`            |
++| `policy`      | `enforced`, `planned`, `none`                                               | `none`              |
++| `tier`        | `T0`, `T1`, `T2`, `T3`, `T4`                                                | `T0` (nobody named) |
++| `evidence`    | `automatic`, `attested`, `none`                                             | `none`              |
++| `status`      | `active`, `pilot`, `paused`, `retired`                                      | `active`            |
++| `kinds`       | A comma-separated list of `logs`, `tests`, `gates`, `attestations`          | No kinds            |
++| `hosting`     | `own-premises`, `eu-supplier`, `eea-supplier`, `non-eu-supplier`, `unknown` | `unknown`           |
++| `operated_by` | `self`, `supplier`                                                          | `self`              |
++| `suppliers`   | A comma-separated list of supplier ids                                      | No suppliers        |
++
++### Supplier attributes
++
++| Attribute      | Values                                          | If omitted |
++| -------------- | ----------------------------------------------- | ---------- |
++| `role`         | `model`, `hosting`, `application`, `operations` | Required   |
++| `jurisdiction` | `EU`, `EEA`, `non-EU`                           | Required   |
++
++### Absences are drawn as absences
++
++An attribute that is left out is never guessed. A unit without `policy` has no diamond, a unit without `tier` has no seat, a unit without `evidence` has no baseline, and a unit without `hosting` has hosting `unknown`. The picture therefore shows what is not known or not in place, which is the point of the notation. A value outside the scales above, an unknown attribute, an attribute given twice and a missing required attribute are errors that name the unit.
++
++### Quoting and escaping
++
++Names, labels, locations, subtitles, footers and panel names are quoted strings, in double or single quotes. Inside a string, a backslash escapes the next character, so `\"` is a double quote and `\\` a backslash. Unit and supplier ids are bare words or numbers and cannot hold spaces.
++
++## The six views
++
++### Landscape (V1)
++
++One panel. Every unit is a mark on the grid of autonomy (columns) by reversibility (rows), with all seven dimensions. The top right cell (Level 4 Autonomous, R4 Irreversible) is shaded faintly, because a well-governed landscape has nothing there.
++
++```mermaid-example
++contour-beta
++  view landscape
++  title Three AI uses
++  subtitle "Illustrative"
++  panel "Regional council"
++    unit AS "Case summaries" level=0 rev=R1 reach=M mode=2
++    unit BT "Benefit triage" level=2 rev=R3 reach=XL mode=4 identity=own policy=enforced tier=T2 evidence=automatic
++    unit RT "Roster routing" level=3 rev=R2 reach=L mode=5 identity=own policy=planned tier=T1 evidence=attested
++```
++
++### Year (V2)
++
++Two panels: the landscape at the start of a period and at its end. A unit that changed cell has a trail from its earlier to its later position, a unit that appears only in the second panel is marked new. Units are matched by id, so the year view is the one view where the same id appears in both panels.
++
++```mermaid-example
++contour-beta
++  view year
++  title A year of change
++  panel "2026-01-01"
++    unit A "Case summaries" level=0 rev=R1 reach=M mode=2
++    unit B "Benefit triage" level=1 rev=R2 reach=L mode=4 identity=own
++  panel "2027-01-01"
++    unit A "Case summaries" level=1 rev=R1 reach=L mode=2
++    unit B "Benefit triage" level=2 rev=R3 reach=XL mode=4 identity=own policy=enforced tier=T2
++    unit C "Roster routing" level=3 rev=R2 reach=M mode=5 identity=own
++```
++
++### Supply (V3)
++
++One panel and the suppliers. Marks are placed in containers: the organisation's own boundary for `hosting=own-premises`, a container per supplier otherwise, and a dotted container for jurisdictions outside the EU and the EEA. A unit lists the suppliers it relies on with `suppliers=`, by id.
++
++```mermaid-example
++contour-beta
++  view supply
++  title Who supplies what
++  panel "Regional council"
++    unit A "Case summaries" level=0 rev=R1 reach=M mode=2 hosting=eu-supplier operated_by=supplier suppliers=m1,h1
++    unit B "Benefit triage" level=2 rev=R3 reach=XL mode=4 identity=own hosting=own-premises suppliers=m1
++  supplier m1 "Model provider" "Sweden" role=model jurisdiction=EU
++  supplier h1 "Cloud region" "Finland" role=hosting jurisdiction=EU
++```
++
++### Decisions (V4)
++
++One panel. One row per unit, sorted by level and id, with a bar from Level 0 to the unit's level, the seat with its tier and the policy point. A unit that holds several levels lists its action classes with `action`, each drawn as a thin bar.
++
++```mermaid-example
++contour-beta
++  view decisions
++  title Who decides what
++  panel "Regional council"
++    unit B "Benefit triage" level=2 rev=R3 reach=XL mode=4 identity=own policy=enforced tier=T2
++      action "rank the queue" 0
++      action "flag a case" 1
++      action "request a document" 2
++    unit A "Case summaries" level=0 rev=R1 reach=M mode=2 tier=T1
++```
++
++### Evidence (V5)
++
++One panel. One row per unit and a column per kind of evidence: `logs`, `tests`, `gates`, `attestations`, and none. The kinds a unit lists with `kinds=` are filled for automatic evidence and hatched for attestations.
++
++```mermaid-example
++contour-beta
++  view evidence
++  title Where the proof comes from
++  panel "Regional council"
++    unit B "Benefit triage" level=2 rev=R3 reach=XL mode=4 identity=own evidence=automatic kinds=logs,tests,gates
++    unit C "Roster routing" level=3 rev=R2 reach=L mode=5 identity=own evidence=attested kinds=attestations
++    unit A "Case summaries" level=0 rev=R1 reach=M mode=2
++```
++
++### Compare (V6)
++
++Two panels, two organisations, drawn side by side at identical scales with a shared legend. Nothing is rescaled to fit. Unit ids are unique across the diagram in this view.
++
++```mermaid-example
++contour-beta
++  view compare
++  title Two organisations
++  panel "Regional council"
++    unit A "Case summaries" level=0 rev=R1 reach=M mode=2
++    unit B "Benefit triage" level=2 rev=R3 reach=XL mode=4 identity=own policy=enforced tier=T2
++  panel "Mutual insurer"
++    unit C "Claims triage" level=1 rev=R2 reach=XL mode=4 identity=own policy=enforced tier=T2
++    unit D "Quote engine" level=3 rev=R3 reach=XL mode=5 identity=own policy=planned tier=T3
++```
++
++## Limitations
++
++- **Beta.** The keyword is `contour-beta`, and the syntax may change.
++- **One view per diagram.** A diagram draws the single view named by `view`, or implied by its number of panels. To show several views, write several diagrams.
++- **Fixed palette.** The mode colours and the other colours of the notation come from a fixed palette chosen for colour-vision deficiency, and they do not follow Mermaid themes yet. The mode number is always drawn in the mark, so the diagram never depends on colour alone.
++- **Fixed geometry.** Sizes, scales and layout are fixed so that the diagram can be redrawn by hand and compared; there is no configuration block for them.
++- **At most two panels**, and the year and compare views need exactly two.
++
++## Accessibility
++
++`accTitle` and `accDescr` are supported, as in other Mermaid diagrams:
++
++```mermaid-example
++contour-beta
++  accTitle: One AI use
++  accDescr: A single advisory AI use at the lowest reversibility tier.
++  unit A "Case summaries" level=0 rev=R1 reach=M mode=2
++```
+diff --git a/packages/mermaid/src/mermaidAPI.spec.ts b/packages/mermaid/src/mermaidAPI.spec.ts
+index 056bb90..1d2533e 100644
+--- a/packages/mermaid/src/mermaidAPI.spec.ts
++++ b/packages/mermaid/src/mermaidAPI.spec.ts
+@@ -1153,6 +1153,11 @@ ${diagram}`,
+       { textDiagramType: 'stateDiagram-v2', expectedType: 'stateDiagram' },
+       { textDiagramType: 'treeView-beta', expectedType: 'treeView' },
+       { textDiagramType: 'radar-beta', expectedType: 'radar' },
++      {
++        textDiagramType: 'contour-beta',
++        expectedType: 'contour',
++        content: 'unit A "a" level=0 rev=R1 reach=S mode=0',
++      },
+       { textDiagramType: 'architecture-beta', expectedType: 'architecture' },
+     ];
+ 
+diff --git a/packages/mermaid/src/rendering-util/multi-diagram-id-uniqueness.spec.ts b/packages/mermaid/src/rendering-util/multi-diagram-id-uniqueness.spec.ts
+index e083146..8813714 100644
+--- a/packages/mermaid/src/rendering-util/multi-diagram-id-uniqueness.spec.ts
++++ b/packages/mermaid/src/rendering-util/multi-diagram-id-uniqueness.spec.ts
+@@ -198,6 +198,9 @@ union A, B`,
+     Electric Kettle -> Kettle
+     Smart Kettle -> Kettle`,
+ 
++  contour: `contour-beta
++    unit A "Case summaries" level=0 rev=R1 reach=M mode=2`,
++
+   cynefin: `cynefin-beta
+     title Incident Response
+     complex
+-- 
+2.43.0
+

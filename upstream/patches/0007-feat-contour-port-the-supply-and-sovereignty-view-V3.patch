@@ -1,0 +1,637 @@
+From e890c702b7dbf36f247be47800da1f44d4c7bf85 Mon Sep 17 00:00:00 2001
+From: claude <noreply@anthropic.com>
+Date: Fri, 20 Nov 2026 22:59:48 +0000
+Subject: [PATCH 7/9] feat(contour): port the supply and sovereignty view (V3)
+ to TypeScript
+
+---
+ .../src/diagrams/contour/views/supply.spec.ts | 192 ++++++++
+ .../src/diagrams/contour/views/supply.ts      | 416 +++++++++++++++++-
+ 2 files changed, 604 insertions(+), 4 deletions(-)
+ create mode 100644 packages/mermaid/src/diagrams/contour/views/supply.spec.ts
+
+diff --git a/packages/mermaid/src/diagrams/contour/views/supply.spec.ts b/packages/mermaid/src/diagrams/contour/views/supply.spec.ts
+new file mode 100644
+index 0000000..2ca361b
+--- /dev/null
++++ b/packages/mermaid/src/diagrams/contour/views/supply.spec.ts
+@@ -0,0 +1,192 @@
++import { describe, expect, it } from 'vitest';
++import type { Canvas } from '../canvas.js';
++import { PAL } from '../common.js';
++import type { ContourModel, ContourSupplier, ContourUnit } from '../types.js';
++import { layoutSupply } from './supply.js';
++
++const unit = (id: string, extra: Partial<ContourUnit> = {}): ContourUnit => ({
++  id,
++  name: id,
++  level: 2,
++  reversibility: 'R1',
++  reach: 'S',
++  mode: 3,
++  identity: 'person',
++  policy: 'none',
++  tier: 'T0',
++  evidence: 'none',
++  status: 'active',
++  kinds: [],
++  hosting: 'own-premises',
++  operatedBy: 'self',
++  suppliers: [],
++  actions: [],
++  ...extra,
++});
++
++const supplier = (id: string, extra: Partial<ContourSupplier> = {}): ContourSupplier => ({
++  id,
++  label: `Label of ${id}`,
++  location: null,
++  role: 'hosting',
++  jurisdiction: 'EU',
++  ...extra,
++});
++
++const model = (units: ContourUnit[], suppliers: ContourSupplier[] = []): ContourModel => ({
++  view: 'supply',
++  title: 'Title',
++  subtitle: '',
++  footer: [],
++  panels: [{ name: 'Nordvik', units }],
++  suppliers,
++});
++
++interface Drawn {
++  cv: Canvas;
++  svg: Element;
++  texts: string[];
++  marks: string[];
++  links: number;
++  chips: number;
++}
++
++/** Polylines in the supplier colour: the links, and the one line of the legend entry for a link. */
++const supplierLines = (svg: Element): number =>
++  [...svg.querySelectorAll('polyline')].filter((p) => p.getAttribute('stroke') === PAL.supplier)
++    .length;
++
++const draw = (m: ContourModel): Drawn => {
++  const cv = layoutSupply(m);
++  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
++  cv.flush(svg);
++  const texts = [...svg.querySelectorAll('text')].map((t) => t.textContent ?? '');
++  return {
++    cv,
++    svg,
++    texts,
++    marks: [...svg.querySelectorAll('desc[data-unit]')].map((d) => d.getAttribute('data-unit')!),
++    links: supplierLines(svg),
++    chips: texts.filter((t) => t === 'model').length,
++  };
++};
++
++const LEGEND_LINES = (() => {
++  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
++  layoutSupply(model([])).flush(svg);
++  return supplierLines(svg);
++})();
++
++const hasText = (d: Drawn, part: string) => d.texts.some((t) => t.includes(part));
++
++describe('contour supply view (V3)', () => {
++  it('draws a unit hosted on own premises in the box of the organisation', () => {
++    const d = draw(model([unit('A')]));
++    expect(d.marks).toEqual(['A']);
++    expect(d.texts).toEqual(expect.arrayContaining(['Nordvik', 'EU and EEA']));
++    expect(hasText(d, 'Supplier')).toBe(false);
++    expect(hasText(d, 'Non-EU')).toBe(false);
++    expect(d.cv.height).toBe(7.5);
++  });
++
++  it('places a unit in the box of its declared supplier', () => {
++    const d = draw(
++      model(
++        [unit('A', { hosting: 'eu-supplier', suppliers: ['h'] })],
++        [supplier('h', { role: 'hosting' })]
++      )
++    );
++    expect(d.marks).toEqual(['A']);
++    expect(d.texts).toContain('Supplier: hosting (EU)');
++    expect(d.texts).toContain('Label of h');
++    expect(hasText(d, 'unnamed')).toBe(false);
++    expect(d.links).toBe(LEGEND_LINES);
++  });
++
++  it('ignores a supplier id that the model does not declare', () => {
++    const d = draw(model([unit('A', { hosting: 'eu-supplier', suppliers: ['ghost'] })]));
++    expect(d.marks).toEqual(['A']);
++    expect(d.texts).toContain('Supplier: unnamed (EU)');
++    expect(d.chips).toBe(0);
++  });
++
++  it('draws one chip and two links for a model supplier shared by two units', () => {
++    const d = draw(
++      model(
++        [
++          unit('A', { hosting: 'eu-supplier', suppliers: ['h', 'm'] }),
++          unit('B', { hosting: 'eu-supplier', suppliers: ['h', 'm'] }),
++        ],
++        [supplier('h'), supplier('m', { role: 'model', label: 'Model maker' })]
++      )
++    );
++    expect(d.chips).toBe(1);
++    expect(d.links).toBe(LEGEND_LINES + 2);
++    expect(d.texts).toContain('Supplier: model provider (EU)');
++    expect(d.texts).toContain('Supplier: hosting (EU)');
++  });
++
++  it('draws no chip when the model supplier is also the placement', () => {
++    const d = draw(
++      model(
++        [unit('A', { hosting: 'eu-supplier', suppliers: ['m'] })],
++        [supplier('m', { role: 'model' })]
++      )
++    );
++    expect(d.marks).toEqual(['A']);
++    expect(d.chips).toBe(0);
++    expect(d.links).toBe(LEGEND_LINES);
++  });
++
++  it('puts a non-EU supplier in a box for its jurisdiction', () => {
++    const d = draw(
++      model(
++        [unit('A', { hosting: 'non-eu-supplier', suppliers: ['x'] })],
++        [supplier('x', { jurisdiction: 'non-EU', location: 'United States', role: 'application' })]
++      )
++    );
++    expect(d.texts).toContain('Non-EU jurisdiction: United States');
++    expect(d.texts).toContain('Supplier: application (non-EU)');
++  });
++
++  it('uses the generic boxes for hosting without a declared supplier', () => {
++    const d = draw(
++      model([
++        unit('A', { hosting: 'unknown' }),
++        unit('B', { hosting: 'eea-supplier' }),
++        unit('C', { hosting: 'non-eu-supplier' }),
++      ])
++    );
++    expect(d.marks.sort()).toEqual(['A', 'B', 'C']);
++    expect(d.texts).toContain('Supplier: unnamed (EEA)');
++    // the titles of the two groups may be truncated to the width of their column
++    expect(d.texts.filter((t) => t.startsWith('Non-EU jurisdiction: '))).toHaveLength(2);
++    expect(hasText(d, 'Non-EU jurisdiction: j')).toBe(true);
++    expect(hasText(d, 'Non-EU jurisdiction: o')).toBe(true);
++    expect(d.texts.filter((t) => t === 'Supplier: unnamed (non-EU)')).toHaveLength(2);
++  });
++
++  it('grows the canvas when the boxes need more room', () => {
++    const units = Array.from({ length: 160 }, (_, k) =>
++      unit(`U${String(k).padStart(3, '0')}`, { reach: 'XL' })
++    );
++    const d = draw(model(units));
++    expect(d.marks).toHaveLength(160);
++    expect(d.cv.height).toBeGreaterThan(7.5);
++    expect(d.cv.height * 2).toBe(Math.round(d.cv.height * 2));
++    expect(d.svg.querySelector('rect')?.getAttribute('height')).toBe(String(d.cv.height * 100));
++  });
++
++  it('draws an empty view for a model without units', () => {
++    const d = draw(model([]));
++    expect(d.marks).toEqual([]);
++    expect(d.texts).toEqual(expect.arrayContaining(['EU and EEA', 'Nordvik']));
++    expect(d.cv.height).toBe(7.5);
++  });
++
++  it('draws an empty view for a model without panels', () => {
++    const d = draw({ ...model([]), panels: [] });
++    expect(d.marks).toEqual([]);
++    expect(d.texts).toContain('EU and EEA');
++  });
++});
+diff --git a/packages/mermaid/src/diagrams/contour/views/supply.ts b/packages/mermaid/src/diagrams/contour/views/supply.ts
+index f927c9d..839233b 100644
+--- a/packages/mermaid/src/diagrams/contour/views/supply.ts
++++ b/packages/mermaid/src/diagrams/contour/views/supply.ts
+@@ -1,7 +1,415 @@
+-import type { Canvas } from '../canvas.js';
+-import type { ContourModel } from '../types.js';
++// cspell:ignore zorder
++import { Canvas } from '../canvas.js';
++import {
++  BOX_GAP,
++  BOX_PAD,
++  BOX_TITLE_LINE,
++  FIG_H,
++  FIG_W,
++  FONT_SIZE,
++  FOOTER_BAND,
++  ITEM_GAP,
++  LEGEND_BOTTOM,
++  LEGEND_TOP,
++  LEGEND_WIDTH,
++  MARGIN,
++  PAL,
++  SUPPLIER_ROLE_NAMES,
++  TITLE_BAND,
++  compareStrings,
++  drawBackground,
++  drawLegend,
++  drawMark,
++  drawTitleFooter,
++  flow,
++  markFootprint,
++  round,
++  textWidth,
++  truncateToWidth,
++  wrapToWidth,
++} from '../common.js';
++import type { Footprint } from '../common.js';
++import type { ContourModel, ContourPanel, ContourSupplier, ContourUnit } from '../types.js';
++
++type BoxStyle = 'solid' | 'dashed' | 'dotted' | 'area';
++
++/** Something placed inside a box: a mark or a model chip, with the room it takes and how to draw it. */
++interface Leaf {
++  key: string;
++  fp: Footprint;
++  draw: (cv: Canvas, x: number, y: number) => void;
++}
++
++interface BoxOptions {
++  subtitle?: string;
++  fillWidth?: boolean;
++}
++
++interface BoxLook {
++  colour: string;
++  dashes: readonly number[] | null;
++  lw: number;
++  face: string;
++}
++
++const BOX_LOOKS: Record<BoxStyle, BoxLook> = {
++  solid: { colour: PAL.ink, dashes: null, lw: 1.2, face: 'none' },
++  dashed: { colour: PAL.supplier, dashes: [4, 2], lw: 1.0, face: 'none' },
++  dotted: { colour: PAL.nonEu, dashes: [1.2, 1.6], lw: 1.1, face: 'none' },
++  area: { colour: PAL.grid, dashes: null, lw: 0.8, face: PAL.ice },
++};
++
++type Position = [number, number];
++
++/** A titled container that holds leaves or other boxes; it measures, arranges and draws itself. */
++class Box {
++  public readonly leaves: Leaf[] = [];
++  public readonly children: Box[] = [];
++  public readonly subtitle: string;
++  public readonly fillWidth: boolean;
++  private readonly minWidth = 1.6;
++  public w = 0;
++  public h = 0;
++  private x = 0;
++  private y = 0;
++  private titleLines: string[] = [];
++  private leafRows: Leaf[][] = [];
++  private boxRows: Box[][] = [];
++
++  public constructor(
++    public readonly title: string,
++    private readonly style: BoxStyle,
++    { subtitle = '', fillWidth = false }: BoxOptions = {}
++  ) {
++    this.subtitle = subtitle;
++    this.fillWidth = fillWidth;
++  }
++
++  public fitTitle(width: number): void {
++    const inner = width - 2 * BOX_PAD;
++    this.titleLines = [];
++    if (this.title) {
++      this.titleLines.push(truncateToWidth(this.title, inner));
++    }
++    if (this.subtitle) {
++      this.titleLines.push(...wrapToWidth(this.subtitle, inner, FONT_SIZE, 2));
++    }
++  }
++
++  private titleH(): number {
++    return BOX_TITLE_LINE * this.titleLines.length + (this.titleLines.length ? 0.04 : 0);
++  }
++
++  public measure(maxW: number): void {
++    const innerW = maxW - 2 * BOX_PAD;
++    this.fitTitle(maxW);
++    let contentW: number;
++    let contentH: number;
++    this.leafRows = [];
++    this.boxRows = [];
++    if (this.leaves.length) {
++      this.leafRows = flow(this.leaves, innerW, (l) => l.fp.width, ITEM_GAP);
++      contentW = Math.max(
++        ...this.leafRows.map(
++          (r) => r.reduce((s, l) => s + l.fp.width, 0) + ITEM_GAP * (r.length - 1)
++        )
++      );
++      contentH =
++        this.leafRows.reduce((s, r) => s + Math.max(...r.map((l) => l.fp.up + l.fp.down)), 0) +
++        ITEM_GAP * (this.leafRows.length - 1);
++    } else if (this.children.length) {
++      this.children.forEach((c) => c.measure(innerW));
++      this.boxRows = flow(this.children, innerW, (c) => c.w, BOX_GAP);
++      contentW = Math.max(
++        ...this.boxRows.map((r) => r.reduce((s, c) => s + c.w, 0) + BOX_GAP * (r.length - 1))
++      );
++      contentH =
++        this.boxRows.reduce((s, r) => s + Math.max(...r.map((c) => c.h)), 0) +
++        BOX_GAP * (this.boxRows.length - 1);
++    } else {
++      contentW = 0.6;
++      contentH = 0.2;
++    }
++    const wanted = Math.max(
++      contentW,
++      Math.min(
++        1.9,
++        Math.max(
++          this.title ? textWidth(this.title) : 0,
++          this.subtitle ? textWidth(this.subtitle) / 2 + 0.3 : 0
++        )
++      )
++    );
++    const natural = Math.max(this.minWidth, wanted + 2 * BOX_PAD);
++    this.w = this.fillWidth ? maxW : Math.min(maxW, natural);
++    this.fitTitle(this.w);
++    this.h = contentH + 2 * BOX_PAD + this.titleH();
++  }
++
++  /** Places the box with its top left corner at (x, yTop) and records the centre of every leaf. */
++  public arrange(x: number, yTop: number, pos: Map<string, Position>): void {
++    this.x = x;
++    this.y = yTop;
++    let cy = yTop - BOX_PAD - this.titleH();
++    if (this.leaves.length) {
++      for (const row of this.leafRows) {
++        const rowH = Math.max(...row.map((l) => l.fp.up + l.fp.down));
++        const rowUp = Math.max(...row.map((l) => l.fp.up));
++        let cx = x + BOX_PAD;
++        for (const leaf of row) {
++          pos.set(leaf.key, [cx + leaf.fp.left, cy - rowUp]);
++          cx += leaf.fp.width + ITEM_GAP;
++        }
++        cy -= rowH + ITEM_GAP;
++      }
++    } else {
++      const innerW = this.w - 2 * BOX_PAD;
++      for (const row of this.boxRows) {
++        const rowH = Math.max(...row.map((c) => c.h));
++        const extra = innerW - (row.reduce((s, c) => s + c.w, 0) + BOX_GAP * (row.length - 1));
++        let cx = x + BOX_PAD;
++        for (const child of row) {
++          child.w += Math.max(0, extra) / row.length;
++          child.fitTitle(child.w);
++          child.arrange(cx, cy, pos);
++          cx += child.w + BOX_GAP;
++        }
++        cy -= rowH + BOX_GAP;
++      }
++    }
++  }
++
++  public draw(cv: Canvas): void {
++    const { colour, dashes, lw, face } = BOX_LOOKS[this.style];
++    cv.rect(this.x, this.y - this.h, this.w, this.h, {
++      face,
++      edge: colour,
++      lw,
++      dashes,
++      zorder: 1,
++      rounding: 0.08,
++    });
++    const titleColour = this.style === 'area' || this.style === 'solid' ? PAL.ink : colour;
++    this.titleLines.forEach((t, k) => {
++      const first = k === 0 && !!this.title;
++      cv.text(this.x + BOX_PAD, this.y - BOX_PAD - 0.04 - k * BOX_TITLE_LINE, t, {
++        colour: first ? titleColour : PAL.muted,
++        weight: first ? 'bold' : 'normal',
++      });
++    });
++    this.children.forEach((c) => c.draw(cv));
++  }
++}
++
++const markLeaf = (u: ContourUnit): Leaf => ({
++  key: u.id,
++  fp: markFootprint(u),
++  draw: (cv, x, y) => drawMark(cv, x, y, u),
++});
++
++const chipLeaf = (sup: ContourSupplier): Leaf => ({
++  key: `chip:${sup.id}`,
++  fp: { left: 0.3, right: 0.3, up: 0.12, down: 0.12, width: 0.6 },
++  draw: (cv, x, y) => {
++    cv.rect(x - 0.28, y - 0.1, 0.56, 0.2, {
++      face: PAL.background,
++      edge: PAL.supplier,
++      lw: 0.9,
++      rounding: 0.05,
++      zorder: 4,
++    });
++    cv.text(x, y, 'model', { colour: PAL.supplier, ha: 'center', weight: 'bold', zorder: 5 });
++  },
++});
++
++const setDefault = <K, V>(map: Map<K, V>, key: K, make: () => V): V => {
++  let value = map.get(key);
++  if (value === undefined) {
++    value = make();
++    map.set(key, value);
++  }
++  return value;
++};
++
++const sortedValues = <V>(map: Map<string, V>): V[] =>
++  [...map.keys()].sort(compareStrings).map((k) => map.get(k)!);
++
++const PLACEMENT_ROLES = ['hosting', 'application', 'operations', 'model'] as const;
+ 
+ /** V3 The supply and sovereignty view. */
+-export function layoutSupply(_model: ContourModel): Canvas {
+-  throw new Error('contour: view supply is not implemented');
++export function layoutSupply(model: ContourModel): Canvas {
++  const panel: ContourPanel = model.panels[0] ?? { name: '', units: [] };
++  const suppliers = new Map(model.suppliers.map((s) => [s.id, s]));
++  const own = new Box(panel.name, 'solid', {
++    subtitle: 'own premises, tenant and data centre',
++    fillWidth: true,
++  });
++  const euBoxes = new Map<string, Box>();
++  const nonEuGroups = new Map<string, Map<string, Box>>();
++  const chipLinks: [string, string][] = [];
++
++  const supplierBox = (sup: ContourSupplier): Box => {
++    const title = `Supplier: ${SUPPLIER_ROLE_NAMES[sup.role].toLowerCase()} (${sup.jurisdiction})`;
++    const make = () => new Box(title, 'dashed', { subtitle: sup.label });
++    if (sup.jurisdiction === 'EU' || sup.jurisdiction === 'EEA') {
++      return setDefault(euBoxes, sup.id, make);
++    }
++    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- an empty location is none
++    const group = sup.location || 'outside the EU and the EEA';
++    return setDefault(
++      setDefault(nonEuGroups, group, () => new Map<string, Box>()),
++      sup.id,
++      make
++    );
++  };
++  const genericBox = (hosting: ContourUnit['hosting']): Box => {
++    if (hosting === 'eu-supplier' || hosting === 'eea-supplier') {
++      return setDefault(
++        euBoxes,
++        `generic:${hosting}`,
++        () => new Box(`Supplier: unnamed (${hosting === 'eu-supplier' ? 'EU' : 'EEA'})`, 'dashed')
++      );
++    }
++    const group =
++      hosting === 'non-eu-supplier' ? 'outside the EU and the EEA' : 'jurisdiction unknown';
++    return setDefault(
++      setDefault(nonEuGroups, group, () => new Map<string, Box>()),
++      `generic:${hosting}`,
++      () => new Box('Supplier: unnamed (non-EU)', 'dashed')
++    );
++  };
++  const placement = (u: ContourUnit): ContourSupplier | null => {
++    for (const role of PLACEMENT_ROLES) {
++      for (const sid of u.suppliers) {
++        const sup = suppliers.get(sid);
++        if (sup?.role === role) {
++          return sup;
++        }
++      }
++    }
++    return null;
++  };
++
++  for (const u of panel.units) {
++    let placedIn: ContourSupplier | null = null;
++    if (u.hosting === 'own-premises') {
++      own.leaves.push(markLeaf(u));
++    } else {
++      placedIn = placement(u);
++      (placedIn ? supplierBox(placedIn) : genericBox(u.hosting)).leaves.push(markLeaf(u));
++    }
++    for (const sid of u.suppliers) {
++      const sup = suppliers.get(sid);
++      if (sup?.role === 'model' && sup !== placedIn) {
++        const box = supplierBox(sup);
++        if (!box.leaves.some((l) => l.key === `chip:${sup.id}`)) {
++          box.leaves.push(chipLeaf(sup));
++        }
++        chipLinks.push([u.id, `chip:${sup.id}`]);
++      }
++    }
++  }
++
++  const euArea = new Box('EU and EEA', 'area', { fillWidth: true });
++  euArea.children.push(own, ...sortedValues(euBoxes));
++  const nonEuBoxes = [...nonEuGroups.keys()].sort(compareStrings).map((group) => {
++    const box = new Box(`Non-EU jurisdiction: ${group}`, 'dotted');
++    box.children.push(...sortedValues(nonEuGroups.get(group)!));
++    return box;
++  });
++
++  const plotLeft = MARGIN;
++  const plotRight = FIG_W - MARGIN - LEGEND_WIDTH - 0.3;
++  const plotBottom = FOOTER_BAND + 0.1;
++  const columnGap = 0.2;
++  const totalW = plotRight - plotLeft;
++
++  interface Columns {
++    leftW: number;
++    leftH: number;
++    rightH: number;
++    rows: Box[][];
++  }
++  const measureColumns = (rightW: number): Columns => {
++    const leftW = totalW - rightW - (nonEuBoxes.length ? columnGap : 0);
++    euArea.measure(leftW);
++    nonEuBoxes.forEach((b) => b.measure(rightW));
++    const ordered = [...nonEuBoxes].sort(
++      (a, b) => round(-a.w, 3) - round(-b.w, 3) || compareStrings(a.title, b.title)
++    );
++    const rows = nonEuBoxes.length ? flow(ordered, rightW, (b) => b.w, BOX_GAP) : [];
++    const rightH =
++      rows.reduce((s, r) => s + Math.max(...r.map((b) => b.h)), 0) +
++      BOX_GAP * Math.max(0, rows.length - 1);
++    return { leftW, leftH: euArea.h, rightH, rows };
++  };
++
++  let rightW = 0;
++  if (nonEuBoxes.length) {
++    const n = Math.floor((totalW - 2.6 - 2.6) / 0.1) + 1;
++    let best: { height: number; w: number } | null = null;
++    for (let k = 0; k < n; k++) {
++      const w = round(2.6 + 0.1 * k, 1);
++      const m = measureColumns(w);
++      const height = round(Math.max(m.leftH, m.rightH), 3);
++      if (!best || height < best.height || (height === best.height && w < best.w)) {
++        best = { height, w };
++      }
++    }
++    rightW = best?.w ?? 0;
++  }
++  const { leftW, leftH, rightH, rows } = measureColumns(rightW);
++  const needed = Math.max(leftH, rightH);
++  let height = FIG_H;
++  if (FIG_H - TITLE_BAND - 0.05 - needed < plotBottom) {
++    height = Math.ceil((needed + TITLE_BAND + 0.05 + FOOTER_BAND + 0.1) * 2) / 2;
++  }
++  // The canvas is created only now: the page grows when the boxes need it.
++  const cv = new Canvas(FIG_W, height);
++  drawBackground(cv);
++  drawTitleFooter(cv, model);
++  const plotTop = cv.height - TITLE_BAND - 0.05;
++  const pos = new Map<string, Position>();
++  euArea.arrange(plotLeft, plotTop, pos);
++  let cy = plotTop;
++  const rightX = plotLeft + leftW + columnGap;
++  for (const row of rows) {
++    const extra = rightW - (row.reduce((s, b) => s + b.w, 0) + BOX_GAP * (row.length - 1));
++    let cx = rightX;
++    for (const box of row) {
++      box.w += Math.max(0, extra) / row.length;
++      box.fitTitle(box.w);
++      box.arrange(cx, cy, pos);
++      cx += box.w + BOX_GAP;
++    }
++    cy -= Math.max(...row.map((b) => b.h)) + BOX_GAP;
++  }
++  euArea.draw(cv);
++  nonEuBoxes.forEach((b) => b.draw(cv));
++  for (const [uid, chip] of chipLinks) {
++    const [ux, uy] = pos.get(uid)!;
++    const [chx, chy] = pos.get(chip)!;
++    cv.line([ux, chx], [uy, chy], { colour: PAL.supplier, lw: 0.8, zorder: 2 });
++  }
++  const drawLeaves = (box: Box): void => {
++    for (const l of box.leaves) {
++      const [x, y] = pos.get(l.key)!;
++      l.draw(cv, x, y);
++    }
++    box.children.forEach(drawLeaves);
++  };
++  drawLeaves(euArea);
++  nonEuBoxes.forEach(drawLeaves);
++  drawLegend(
++    cv,
++    cv.width - MARGIN - LEGEND_WIDTH,
++    cv.height - LEGEND_TOP,
++    LEGEND_BOTTOM,
++    LEGEND_WIDTH,
++    1,
++    {
++      containers: true,
++    }
++  );
++  return cv;
+ }
+-- 
+2.43.0
+

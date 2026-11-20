@@ -1,0 +1,320 @@
+From 54b12a65f473741eeff5d027e10d587d7c8a6f88 Mon Sep 17 00:00:00 2001
+From: claude <noreply@anthropic.com>
+Date: Fri, 20 Nov 2026 22:56:55 +0000
+Subject: [PATCH 3/9] feat(contour): port the decision-rights view (V4) to
+ TypeScript
+
+---
+ .../diagrams/contour/views/decisions.spec.ts  | 172 ++++++++++++++++++
+ .../src/diagrams/contour/views/decisions.ts   | 119 +++++++++++-
+ 2 files changed, 287 insertions(+), 4 deletions(-)
+ create mode 100644 packages/mermaid/src/diagrams/contour/views/decisions.spec.ts
+
+diff --git a/packages/mermaid/src/diagrams/contour/views/decisions.spec.ts b/packages/mermaid/src/diagrams/contour/views/decisions.spec.ts
+new file mode 100644
+index 0000000..a09826a
+--- /dev/null
++++ b/packages/mermaid/src/diagrams/contour/views/decisions.spec.ts
+@@ -0,0 +1,172 @@
++import { describe, expect, it } from 'vitest';
++import { ACTION_PITCH, DIAMOND_HALF, LEVEL_NAMES, PAL, ROW_PITCH } from '../common.js';
++import type { ContourModel, ContourUnit } from '../types.js';
++import { layoutDecisions } from './decisions.js';
++
++const NS = 'http://www.w3.org/2000/svg';
++
++const unit = (id: string, over: Partial<ContourUnit> = {}): ContourUnit => ({
++  id,
++  name: `Unit ${id}`,
++  level: 1,
++  reversibility: 'R1',
++  reach: 'S',
++  mode: 2,
++  identity: 'person',
++  policy: 'none',
++  tier: 'T0',
++  evidence: 'none',
++  status: 'active',
++  kinds: [],
++  hosting: 'unknown',
++  operatedBy: 'self',
++  suppliers: [],
++  actions: [],
++  ...over,
++});
++
++const modelOf = (units: ContourUnit[]): ContourModel => ({
++  view: 'decisions',
++  title: 'Decisions',
++  subtitle: '',
++  footer: [],
++  panels: [{ name: 'P', units }],
++  suppliers: [],
++});
++
++const draw = (units: ContourUnit[]) => {
++  const cv = layoutDecisions(modelOf(units));
++  const svg = document.createElementNS(NS, 'svg');
++  cv.flush(svg);
++  return { cv, svg };
++};
++
++const texts = (svg: Element) => [...svg.querySelectorAll('text')].map((t) => t.textContent ?? '');
++const rectsWithFill = (svg: Element, fill: string) =>
++  [...svg.querySelectorAll('rect')].filter((r) => r.getAttribute('fill') === fill);
++const rectsWithStroke = (svg: Element, stroke: string) =>
++  [...svg.querySelectorAll('rect')].filter((r) => r.getAttribute('stroke') === stroke);
++
++describe('contour decisions view (V4)', () => {
++  it('sorts the rows by descending level, then by id', () => {
++    const { svg } = draw([
++      unit('B', { level: 2 }),
++      unit('C', { level: 3 }),
++      unit('A', { level: 2 }),
++      unit('D', { level: 0 }),
++    ]);
++    const ids = texts(svg).filter((t) => ['A', 'B', 'C', 'D'].includes(t));
++    expect(ids).toEqual(['C', 'A', 'B', 'D']);
++  });
++
++  it('labels the five level columns', () => {
++    const { svg } = draw([unit('A')]);
++    const all = texts(svg);
++    for (const name of LEVEL_NAMES) {
++      const [a, b, ...rest] = name.split(' ');
++      expect(all).toContain(`${a} ${b}`);
++      expect(all).toContain(rest.join(' '));
++    }
++  });
++
++  it('shades the cell of Level 4 for R3 and R4 rows only', () => {
++    const none = draw([unit('A', { reversibility: 'R1' }), unit('B', { reversibility: 'R2' })]);
++    expect(rectsWithFill(none.svg, PAL.emptyCorner)).toHaveLength(0);
++    const some = draw([
++      unit('A', { reversibility: 'R3' }),
++      unit('B', { reversibility: 'R4' }),
++      unit('C', { reversibility: 'R2' }),
++    ]);
++    expect(rectsWithFill(some.svg, PAL.emptyCorner)).toHaveLength(2);
++  });
++
++  it('outlines Level 3 without an enforced policy point in red, and nothing else', () => {
++    const red = (u: ContourUnit) => rectsWithStroke(draw([u]).svg, PAL.warning).length;
++    expect(red(unit('A', { level: 3, policy: 'none' }))).toBe(1);
++    expect(red(unit('A', { level: 3, policy: 'planned' }))).toBe(1);
++    expect(red(unit('A', { level: 3, policy: 'enforced' }))).toBe(0);
++    expect(red(unit('A', { level: 2, policy: 'none' }))).toBe(0);
++  });
++
++  it('gives each unit a block of one row plus one pitch per action', () => {
++    const pitchBetweenRows = (actions: [string, number][]) => {
++      const { svg } = draw([unit('A', { level: 3, actions }), unit('B', { level: 0 })]);
++      const y = (id: string) =>
++        Number(
++          [...svg.querySelectorAll('text')].find((t) => t.textContent === id)?.getAttribute('y')
++        );
++      return (y('B') - y('A')) / 100;
++    };
++    expect(pitchBetweenRows([])).toBeCloseTo(ROW_PITCH, 2);
++    expect(pitchBetweenRows([['read', 0]])).toBeCloseTo(ROW_PITCH + ACTION_PITCH, 2);
++    const three: [string, number][] = [
++      ['read', 0],
++      ['write', 1],
++      ['send', 2],
++    ];
++    expect(pitchBetweenRows(three)).toBeCloseTo(ROW_PITCH + 3 * ACTION_PITCH, 2);
++    const { svg } = draw([unit('A', { actions: three })]);
++    expect(texts(svg)).toEqual(expect.arrayContaining(['read', 'write', 'send']));
++    // each action bar is 0.05 in thin and has one segment per level up to its own: 1 + 2 + 3
++    const thin = [...svg.querySelectorAll('rect')].filter(
++      (r) => Number(r.getAttribute('height')) === 5
++    );
++    expect(thin).toHaveLength(6);
++  });
++
++  it('truncates a long unit name and a long action name with an ellipsis', () => {
++    const { svg } = draw([
++      unit('A', {
++        name: 'An extraordinarily long unit name that cannot possibly fit in the label area',
++        actions: [['A very long action class name that is far too wide for its column', 1]],
++      }),
++    ]);
++    const cut = texts(svg).filter((t) => t.endsWith('…'));
++    expect(cut).toHaveLength(2);
++    expect(cut.some((t) => t.startsWith('An extraordinarily'))).toBe(true);
++    expect(cut.some((t) => t.startsWith('A very long action'))).toBe(true);
++  });
++
++  // the legend draws a diamond and a seat of its own, so the view is compared with a bare row
++  it('draws a hollow diamond for a planned policy point and a filled one for enforced', () => {
++    const diamonds = (policy: ContourUnit['policy']) =>
++      [...draw([unit('A', { policy })]).svg.querySelectorAll('polygon')].map((p) =>
++        p.getAttribute('fill')
++      );
++    const base = diamonds('none');
++    expect(diamonds('planned')).toHaveLength(base.length + 1);
++    expect(diamonds('planned').filter((f) => f === PAL.background)).toHaveLength(
++      base.filter((f) => f === PAL.background).length + 1
++    );
++    expect(diamonds('enforced').filter((f) => f === PAL.ink)).toHaveLength(
++      base.filter((f) => f === PAL.ink).length + 1
++    );
++  });
++
++  it('draws a decision seat for tiers T1 to T4 and none for T0', () => {
++    const seats = (tier: ContourUnit['tier']) =>
++      draw([unit('A', { tier })]).svg.querySelectorAll(`circle[fill="${PAL.people}"]`).length;
++    expect(seats('T3')).toBe(seats('T0') + 1);
++    expect(seats('T1')).toBe(seats('T0') + 1);
++    expect(texts(draw([unit('A', { tier: 'T3' })]).svg)).toContain('3');
++  });
++
++  it('grows the canvas with the number of units', () => {
++    const small = draw([unit('A')]);
++    expect(small.cv.width).toBe(11);
++    expect(small.cv.height).toBe(7.5);
++    const ids = Array.from({ length: 45 }, (_, i) => `U${String(i).padStart(2, '0')}`);
++    expect(draw(ids.map((id) => unit(id))).cv.height).toBe(12.5);
++    // 45 rows and 31 action rows: 1.61 + 45 * 0.24 + 31 * 0.145 = 16.905 in, rounded up to 17
++    const withActions = ids.map((id, i) => unit(id, { actions: i < 31 ? [['read', 1]] : [] }));
++    expect(draw(withActions).cv.height).toBe(17);
++  });
++
++  it('gives an empty view, not an error, for a model without units', () => {
++    const { cv, svg } = draw([]);
++    expect(cv.height).toBe(7.5);
++    expect(texts(svg)).toContain('Level 0 Advisory'.split(' ').slice(0, 2).join(' '));
++    const noPanels = layoutDecisions({ ...modelOf([]), panels: [] });
++    expect(noPanels.height).toBe(7.5);
++  });
++});
+diff --git a/packages/mermaid/src/diagrams/contour/views/decisions.ts b/packages/mermaid/src/diagrams/contour/views/decisions.ts
+index 083cac0..2670407 100644
+--- a/packages/mermaid/src/diagrams/contour/views/decisions.ts
++++ b/packages/mermaid/src/diagrams/contour/views/decisions.ts
+@@ -1,7 +1,118 @@
+-import type { Canvas } from '../canvas.js';
++// cspell:ignore zorder
++import { Canvas } from '../canvas.js';
++import {
++  ACTION_PITCH,
++  COL_LABEL_HEIGHT,
++  DIAMOND_HALF,
++  FIG_H,
++  FIG_W,
++  FONT_SIZE,
++  FOOTER_BAND,
++  LABEL_AREA,
++  LEGEND_BOTTOM,
++  LEGEND_TOP,
++  LEGEND_WIDTH,
++  LEVEL_NAMES,
++  MARGIN,
++  PAL,
++  ROW_PITCH,
++  SEAT_RADIUS,
++  TITLE_BAND,
++  drawBackground,
++  drawLegend,
++  drawLevelBar,
++  drawTitleFooter,
++  redRule,
++  rowLabel,
++  rowOrder,
++  truncateToWidth,
++} from '../common.js';
+ import type { ContourModel } from '../types.js';
+ 
+-/** V4 The decision-rights view. */
+-export function layoutDecisions(_model: ContourModel): Canvas {
+-  throw new Error('contour: view decisions is not implemented');
++/** V4 The decision-rights view: one row per unit, with a bar to its level and one thin bar per action class. */
++export function layoutDecisions(model: ContourModel): Canvas {
++  const units = rowOrder(model.panels[0]?.units ?? []);
++  const actionCount = units.reduce((sum, u) => sum + u.actions.length, 0);
++  const needed =
++    TITLE_BAND +
++    COL_LABEL_HEIGHT +
++    units.length * ROW_PITCH +
++    actionCount * ACTION_PITCH +
++    0.15 +
++    FOOTER_BAND;
++  const cv = new Canvas(FIG_W, Math.max(FIG_H, Math.ceil(needed * 2) / 2));
++  drawBackground(cv);
++  drawTitleFooter(cv, model);
++  const gridLeft = MARGIN + LABEL_AREA;
++  const gridRight = cv.width - MARGIN - LEGEND_WIDTH - 0.3 - 0.3;
++  const cw = (gridRight - gridLeft) / 5;
++  const top = cv.height - TITLE_BAND - COL_LABEL_HEIGHT;
++  LEVEL_NAMES.forEach((name, i) => {
++    const [a, b, ...rest] = name.split(' ');
++    const cx = gridLeft + (i + 0.5) * cw;
++    cv.text(cx, top + 0.3, `${a} ${b}`, { size: FONT_SIZE + 0.5, ha: 'center', weight: 'bold' });
++    cv.text(cx, top + 0.14, rest.join(' '), { colour: PAL.muted, ha: 'center' });
++  });
++  let y = top;
++  const bottom = top - (units.length * ROW_PITCH + actionCount * ACTION_PITCH);
++  for (let i = 0; i < 6; i++) {
++    cv.line([gridLeft + i * cw, gridLeft + i * cw], [bottom, top], {
++      colour: PAL.grid,
++      lw: 0.6,
++      zorder: 1,
++    });
++  }
++  cv.line([MARGIN, gridRight], [top, top], { colour: PAL.grid, lw: 0.8, zorder: 1 });
++  for (const u of units) {
++    const blockH = ROW_PITCH + u.actions.length * ACTION_PITCH;
++    const rowY = y - ROW_PITCH / 2;
++    if (u.reversibility === 'R3' || u.reversibility === 'R4') {
++      cv.rect(gridLeft + 4 * cw, y - blockH, cw, blockH, { face: PAL.emptyCorner, zorder: 0.5 });
++    }
++    rowLabel(cv, rowY, u, gridLeft - 0.1);
++    const red = redRule(u);
++    drawLevelBar(
++      cv,
++      gridLeft,
++      cw,
++      rowY,
++      u.level,
++      0.13,
++      red ? PAL.warning : PAL.ink,
++      red ? 1.3 : 0.5
++    );
++    const ceiling = gridLeft + (u.level + 1) * cw;
++    if (u.policy !== 'none') {
++      cv.diamond(ceiling, rowY, DIAMOND_HALF, { filled: u.policy === 'enforced', colour: PAL.ink });
++    }
++    if (u.tier !== 'T0') {
++      const sx = ceiling + DIAMOND_HALF + 0.03 + SEAT_RADIUS;
++      cv.circle(sx, rowY, SEAT_RADIUS, { face: PAL.people, edge: PAL.people, lw: 0, zorder: 4 });
++      cv.text(sx, rowY, u.tier[1], {
++        colour: '#FFFFFF',
++        ha: 'center',
++        weight: 'bold',
++        zorder: 5,
++      });
++    }
++    let ay = y - ROW_PITCH;
++    for (const [action, level] of u.actions) {
++      const aY = ay - ACTION_PITCH / 2;
++      cv.text(MARGIN + 0.5, aY, truncateToWidth(action, gridLeft - 0.1 - (MARGIN + 0.5)), {
++        colour: PAL.muted,
++      });
++      drawLevelBar(cv, gridLeft, cw, aY, level, 0.05, null, 0);
++      ay -= ACTION_PITCH;
++    }
++    y -= blockH;
++    cv.line([MARGIN, gridRight], [y, y], { colour: PAL.grid, lw: 0.6, zorder: 1 });
++  }
++  drawLegend(
++    cv,
++    cv.width - MARGIN - LEGEND_WIDTH,
++    cv.height - LEGEND_TOP,
++    LEGEND_BOTTOM,
++    LEGEND_WIDTH
++  );
++  return cv;
+ }
+-- 
+2.43.0
+
