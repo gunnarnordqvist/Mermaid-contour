@@ -22,7 +22,7 @@ The organisations in the examples, Nordvik Region and Hansa Mutual, are fictiona
 ## Use
 
 ```bash
-npm install github:gunnarnordqvist/Mermaid-contour mermaid     # not published on npm; or clone this repository and run npm install
+npm install mermaid-contour mermaid     # or clone this repository and run npm install
 ```
 
 In a page (see `examples/index.html`; serve the repository root, for example with `python3 -m http.server`):
